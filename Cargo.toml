@@ -1,0 +1,20 @@
+[package]
+name = "polar"
+version = "0.1.0"
+edition = "2021"
+default-run = "polar"
+
+[lib]
+name = "polar_library"
+path = "src/library.rs"
+
+[dependencies]
+rocket = { version = "0.5.0-rc.1", features = ["json"] }
+dotenv = "0.15.0"
+clap = { version = "3.1.9", features = ["derive"] }
+serde = "1.0.136"
+
+[dependencies.rocket_sync_db_pools]
+version = "0.1.0-rc.1"
+default-features = false
+features = ["diesel_postgres_pool"]
