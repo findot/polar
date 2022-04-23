@@ -3,6 +3,7 @@ use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::option::Option;
 use std::result::Result as StdResult;
+use std::io::Error as IOError;
 
 use rocket::figment::Error as FigmentError;
 
@@ -14,7 +15,7 @@ pub type Result<'a, T> = StdResult<T, Error<'a>>;
 pub enum ConfigurationError<'a> {
     MissingEntry(&'a str),
     MisconfiguredEntry(&'a str),
-    InvalidSource(&'a str),
+    InvalidSource(IOError),
 }
 
 impl<'a> ConfigurationError<'a> {
@@ -91,5 +92,18 @@ impl<'a> From<FigmentError> for Error<'a> {
 impl<'a, 'b: 'a> From<ConfigurationError<'b>> for Error<'a> {
     fn from(ce: ConfigurationError<'b>) -> Self {
         Error::ConfigurationError(ce)
+    }
+}
+
+impl<'a> From<IOError> for ConfigurationError<'a> {
+    fn from(e: IOError) -> Self {
+        ConfigurationError::InvalidSource(e)
+    }
+}
+
+// FIXME - Might be over-generalized (IOError might happen outside of configuration)
+impl<'a> From<IOError> for Error<'a> {
+    fn from(e: IOError) -> Self {
+        Error::ConfigurationError(e.into())
     }
 }

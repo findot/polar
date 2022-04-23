@@ -25,3 +25,13 @@ ctrlc = true
 signals = ["term", "hup"]
 grace = 5
 mercy = 5
+
+[default.security]
+jwt_lifetime = 600
+jwt_secret = "secret"
+
+[default.database]
+host = "127.0.0.1"
+user = "polar"
+password = "polar"
+schema = "polar"

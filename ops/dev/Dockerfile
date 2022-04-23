@@ -6,7 +6,7 @@ ENV DUMB_INIT_VERSION=1.2.5 \
     PATH=/usr/local/cargo/bin:$PATH \
     RUSTUP_URL="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-musl/rustup-init" \
     RUSTFLAGS="-C target-feature=-crt-static" \
-    LANCE_PROFILE="dev"
+    POLAR_PROFILE="dev"
 
 # DEPENDENCIES
 RUN apk add --update --no-cache \
