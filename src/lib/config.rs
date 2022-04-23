@@ -1,6 +1,5 @@
 use rocket::figment::Error as FigmentError;
 use std::fmt::{Display, Formatter};
-use std::fs::File;
 use std::io::{Error as IOError, ErrorKind};
 use std::path::Path;
 
@@ -44,7 +43,7 @@ enum ConfigFileType {
     AUTO,
     TOML,
     JSON,
-    YAML
+    YAML,
 }
 
 fn from_file(config_file_path: &str) -> Result<Figment, IOError> {
@@ -54,7 +53,10 @@ fn from_file(config_file_path: &str) -> Result<Figment, IOError> {
             Ok(Figment::from(Toml::file(path).nested()))
         } else {
             // TODO - Set to ErrorKind::IsADirectory (see https://github.com/rust-lang/rust/issues/86442)
-            Err(IOError::new(ErrorKind::Other, format!("{}, is a directory", config_file_path)))
+            Err(IOError::new(
+                ErrorKind::Other,
+                format!("{}, is a directory", config_file_path),
+            ))
         }
     } else {
         Err(IOError::new(ErrorKind::NotFound, config_file_path))
@@ -185,7 +187,7 @@ impl Args {
             database_password,
             database_schema,
             jwt_secret,
-            jwt_lifetime
+            jwt_lifetime,
         }
     }
 }
@@ -315,19 +317,19 @@ mod tests {
 
     #[test]
     fn empty_arguments() {
-        let args = Figment::from(Args {
-            configuration: "/etc/polar/polar.toml".to_string(),
-            profile: None,
-            address: None,
-            port: None,
-            database_host: None,
-            database_port: None,
-            database_user: None,
-            database_password: None,
-            database_schema: None,
-            jwt_secret: None,
-            jwt_lifetime: None,
-        });
+        let args = Figment::from(Args::new(
+            Some("/etc/polar/polar.toml".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
 
         let figment = Figment::from(Config::default()).merge(args);
         let config: Result<Config, FigmentError> = figment.extract();
@@ -340,19 +342,19 @@ mod tests {
 
     #[test]
     fn args_default_profile() {
-        let args = Figment::from(Args {
-            configuration: "/etc/polar/polar.toml".to_string(),
-            profile: Some("default".to_string()),
-            address: None,
-            port: None,
-            database_host: None,
-            database_port: None,
-            database_user: None,
-            database_password: None,
-            database_schema: None,
-            jwt_secret: None,
-            jwt_lifetime: None,
-        });
+        let args = Figment::from(Args::new(
+            Some("/etc/polar/polar.toml".to_string()),
+            Some("default".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
 
         let figment = Figment::from(Config::default()).merge(args);
 
@@ -361,19 +363,19 @@ mod tests {
 
     #[test]
     fn args_custom_profile() {
-        let args = Figment::from(Args {
-            configuration: "/etc/polar/polar.toml".to_string(),
-            profile: Some("custom".to_string()),
-            address: None,
-            port: None,
-            database_host: None,
-            database_port: None,
-            database_user: None,
-            database_password: None,
-            database_schema: None,
-            jwt_secret: None,
-            jwt_lifetime: None,
-        });
+        let args = Figment::from(Args::new(
+            Some("/etc/polar/polar.toml".to_string()),
+            Some("custom".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ));
 
         let figment = Figment::from(Config::default()).merge(args);
 
@@ -382,19 +384,19 @@ mod tests {
 
     #[test]
     fn args_random_values() {
-        let args = Figment::from(Args {
-            configuration: "/etc/polar/polar.toml".to_string(),
-            profile: None,
-            address: Some("192.168.1.42".to_string()),
-            port: Some(4200),
-            database_host: Some("42.42.42.42".to_string()),
-            database_port: Some(4242),
-            database_user: Some("test".to_string()),
-            database_password: Some("test".to_string()),
-            database_schema: Some("test".to_string()),
-            jwt_secret: Some("secret".to_string()),
-            jwt_lifetime: Some(42),
-        });
+        let args = Figment::from(Args::new(
+            Some("/etc/polar/polar.toml".to_string()),
+            None,
+            Some("192.168.1.42".to_string()),
+            Some(4200),
+            Some("42.42.42.42".to_string()),
+            Some(4242),
+            Some("test".to_string()),
+            Some("test".to_string()),
+            Some("test".to_string()),
+            Some("secret".to_string()),
+            Some(42),
+        ));
 
         let figment = Figment::from(Config::default()).merge(args);
         let config_result: Result<Config, FigmentError> = figment.extract();
@@ -419,19 +421,19 @@ mod tests {
 
     #[test]
     fn args_random_values_missing() {
-        let args = Figment::from(Args {
-            configuration: "/etc/polar/polar.toml".to_string(),
-            profile: None,
-            address: Some("192.168.1.42".to_string()),
-            port: Some(4200),
-            database_host: Some("42.42.42.42".to_string()),
-            database_port: None,
-            database_user: Some("test".to_string()),
-            database_password: None,
-            database_schema: None,
-            jwt_secret: Some("secret".to_string()),
-            jwt_lifetime: Some(42),
-        });
+        let args = Figment::from(Args::new(
+            Some("/etc/polar/polar.toml".to_string()),
+            None,
+            Some("192.168.1.42".to_string()),
+            Some(4200),
+            Some("42.42.42.42".to_string()),
+            None,
+            Some("test".to_string()),
+            None,
+            None,
+            Some("secret".to_string()),
+            Some(42),
+        ));
 
         let figment = Figment::from(Config::default()).merge(args);
         let config_result: Result<Config, FigmentError> = figment.extract();
@@ -491,7 +493,8 @@ mod tests {
                 "#,
             )?;
 
-            let file_config = Figment::from(Config::default()).merge(from_file("polar.toml").unwrap());
+            let file_config =
+                Figment::from(Config::default()).merge(from_file("polar.toml").unwrap());
             let default_config: Config =
                 file_config.clone().select(Profile::default()).extract()?;
             let custom_config: Config = file_config
@@ -510,19 +513,19 @@ mod tests {
     #[test]
     fn args_select_config_file() {
         Jail::expect_with(|jail| {
-            let args = Args {
-                configuration: "polar.toml".to_string(),
-                profile: None,
-                address: None,
-                port: None,
-                database_host: None,
-                database_port: None,
-                database_user: None,
-                database_password: None,
-                database_schema: None,
-                jwt_secret: None,
-                jwt_lifetime: None,
-            };
+            let args = Args::new(
+                Some("polar.toml".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
 
             jail.create_file(
                 "polar.toml",
@@ -601,5 +604,4 @@ mod tests {
 
         assert!(Config::figment(args).is_err())
     }
-
 }

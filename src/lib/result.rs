@@ -1,9 +1,9 @@
 use crate::lib::result::ConfigurationError::{MisconfiguredEntry, MissingEntry};
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::io::Error as IOError;
 use std::option::Option;
 use std::result::Result as StdResult;
-use std::io::Error as IOError;
 
 use rocket::figment::Error as FigmentError;
 
