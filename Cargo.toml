@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "polar"
 
 [lib]
-name = "polar_library"
+name = "polar"
 path = "src/library.rs"
 
 [dependencies]

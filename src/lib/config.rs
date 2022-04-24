@@ -16,10 +16,14 @@ use crate::lib::result::Error;
 
 /* -------------------------------------- Util functions --------------------------------------- */
 
+pub static DEFAULT_CONF_PATH: &str = "/etc/polar/polar.toml";
+
+#[inline]
 fn ref_str(s: &Option<String>) -> Option<&str> {
-    s.as_ref().map(|s| s.as_str())
+    s.as_ref().map(String::as_str)
 }
 
+#[inline]
 fn prepare_tuples(xs: Vec<(&str, Option<Value>)>) -> Vec<(String, Value)> {
     return xs
         .into_iter()
@@ -28,46 +32,25 @@ fn prepare_tuples(xs: Vec<(&str, Option<Value>)>) -> Vec<(String, Value)> {
         .collect();
 }
 
-fn defaults() -> Figment {
-    Figment::from(Serialized::defaults(Config::default()))
-}
-
-fn from_env() -> Figment {
-    Figment::from(Env::prefixed("POLAR_"))
-}
-
 /* --------------------------------------- File handling --------------------------------------- */
 
-// TODO - Add Yaml and json parsing to config file options
-enum ConfigFileType {
-    AUTO,
-    TOML,
-    JSON,
-    YAML,
-}
+fn from_file(file_path: Option<&str>) -> Result<Figment, IOError> {
+    let was_specified = file_path.is_some();
+    let path_str = file_path.unwrap_or(DEFAULT_CONF_PATH);
+    let path = Path::new(path_str);
 
-fn from_file(config_file_path: &str) -> Result<Figment, IOError> {
-    let path = Path::new(config_file_path);
-    if path.exists() {
-        if path.is_file() {
-            Ok(Figment::from(Toml::file(path).nested()))
-        } else {
-            // TODO - Set to ErrorKind::IsADirectory (see https://github.com/rust-lang/rust/issues/86442)
-            Err(IOError::new(
-                ErrorKind::Other,
-                format!("{}, is a directory", config_file_path),
-            ))
-        }
-    } else {
-        Err(IOError::new(ErrorKind::NotFound, config_file_path))
+    match path.exists() {
+        false if was_specified => Err(IOError::new(ErrorKind::NotFound, path_str)),
+        false => Ok(Figment::new()),
+        true if !path.is_file() => Err(IOError::new(
+            ErrorKind::Other,
+            format!("{}, is a directory", path_str),
+        )),
+        true => Ok(Figment::from(Toml::file(path).nested())),
     }
 }
 
 /* --------------------------------------- Args Parsing ---------------------------------------- */
-
-fn from_args(args: Args) -> Figment {
-    Figment::from(args)
-}
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -77,47 +60,47 @@ fn from_args(args: Args) -> Figment {
     long_about = "TODO"
 )]
 pub struct Args {
-    /// The configuration file path
-    #[clap(short, long, default_value = "/etc/polar/polar.toml")]
-    configuration: String,
+    /// Configuration file path
+    #[clap(short, long)]
+    configuration: Option<String>,
 
-    /// The configuration profile to use
+    /// Configuration profile to use
     #[clap(long)]
     profile: Option<String>,
 
-    /// The interface on which polar should listen
+    /// IP address to bind to
     #[clap(short, long)]
     address: Option<String>,
 
-    /// The port on which polar should listen
+    /// Port number to use for connection or 0 for default
     #[clap(short, long)]
     port: Option<u16>,
 
-    /// The server IP address on which the database must be contacted
+    /// Database IP address to connect to
     #[clap(long)]
     database_host: Option<String>,
 
-    /// The server port on which the database must be contacted
+    /// Database port number to connect to
     #[clap(long)]
     database_port: Option<u16>,
 
-    /// The user with which polar will authenticate to the database
+    /// Username with which polar will authenticate to the database
     #[clap(long)]
     database_user: Option<String>,
 
-    /// The password with which polar will authenticate to the database
+    /// Password with which polar will authenticate to the database
     #[clap(long)]
     database_password: Option<String>,
 
-    /// The database schema to use
+    /// Database schema to use
     #[clap(long)]
     database_schema: Option<String>,
 
-    /// The seed to use for jwt generation
+    /// Seed of the jwt generation
     #[clap(long)]
     jwt_secret: Option<String>,
 
-    /// The lifespan (in seconds) during which any emitted jwt token will be valid
+    /// Lifespan (in seconds) during which any emitted jwt token will be valid
     #[clap(long)]
     jwt_lifetime: Option<u16>,
 }
@@ -177,7 +160,7 @@ impl Args {
         jwt_lifetime: Option<u16>,
     ) -> Self {
         Args {
-            configuration: configuration.unwrap_or("/etc/polar/polar.toml".to_string()),
+            configuration,
             profile,
             address,
             port,
@@ -189,6 +172,12 @@ impl Args {
             jwt_secret,
             jwt_lifetime,
         }
+    }
+
+    fn empty() -> Self {
+        Self::new(
+            None, None, None, None, None, None, None, None, None, None, None,
+        )
     }
 }
 
@@ -244,6 +233,46 @@ impl Default for SecurityConfig {
 
 /* -------------------------------------- General Config --------------------------------------- */
 
+/// General Polar startup and runtime configuration store, attached to rocket as
+/// a managed state for consumption.
+///
+/// # Overview
+///
+/// The `Config` structure is loaded at application startup by reading through 4
+/// different sources. Each subsequent source overrides previously obtained
+/// values if a conflict occurs. The providers of configuration values are, in
+/// order, as follow:
+///
+/// 1. __Defaults__: A set of default values that may, or may not, work
+/// depending on your environment.
+/// 2. __Configuration file__: A TOML-formatted file. The path of this file
+/// defaults to _"/etc/polar/polar.toml"_ and may be provided as an argument
+/// during startup.
+/// 3. __Environment variables__: Any environment variable prefixed with
+/// _"POLAR\_"_ (_e.g_ __POLAR_PORT__) will be read as a candidate for
+/// configuration.
+/// 4. __Program arguments__: Any user provided arguments at application
+/// startup will be parsed as an [Args] structure which will subsequently see
+/// a subset of its data converted to configuration values.
+///
+/// # Example
+///
+/// As an example, consider and endpoint that would consume the configured jwt
+/// lifetime in and endpoint. The token lifetime was set to 900 seconds in the
+/// configuration file but was overridden to be 600 seconds when the app was
+/// started.
+///
+/// ```rust,no_run
+/// use rocket::State;
+/// use polar::config::Config;
+///
+/// #[get("/lifetime")]
+/// fn lifetime(config: State<Config>) -> u16 {
+///     config.security.jwt_lifetime
+/// }
+/// ```
+///
+/// Said endpoint would return the number 600 to any consumer.
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
     pub address: String,
@@ -286,22 +315,22 @@ impl<'a> Config {
         let profile = args
             .profile
             .as_ref()
-            .map(|p| Profile::from(p))
+            .map(Profile::from)
             .unwrap_or(Profile::from_env_or("POLAR_PROFILE", "default"));
 
-        let default_config = defaults();
-        let file_config = from_file(args.configuration.as_str())?;
-        let env_config = from_env();
-        let args_config = from_args(args);
+        let default_config = Figment::from(Serialized::defaults(Config::default()));
+        let file_config = from_file(args.configuration.as_ref().map(String::as_str))?;
+        let env_config = Figment::from(Env::prefixed("POLAR_"));
+        let args_config = Figment::from(args);
 
         let config = base
             .merge(default_config)
             .merge(file_config)
             .merge(env_config)
             .merge(args_config)
-            .select(profile);
+            .select(profile.as_str());
 
-        Ok(database::with_pool(config)?)
+        Ok(database::with_pool(config)?.select(profile.as_str()))
     }
 }
 
@@ -317,19 +346,7 @@ mod tests {
 
     #[test]
     fn empty_arguments() {
-        let args = Figment::from(Args::new(
-            Some("/etc/polar/polar.toml".to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ));
+        let args = Figment::from(Args::empty());
 
         let figment = Figment::from(Config::default()).merge(args);
         let config: Result<Config, FigmentError> = figment.extract();
@@ -343,7 +360,7 @@ mod tests {
     #[test]
     fn args_default_profile() {
         let args = Figment::from(Args::new(
-            Some("/etc/polar/polar.toml".to_string()),
+            None,
             Some("default".to_string()),
             None,
             None,
@@ -364,7 +381,7 @@ mod tests {
     #[test]
     fn args_custom_profile() {
         let args = Figment::from(Args::new(
-            Some("/etc/polar/polar.toml".to_string()),
+            None,
             Some("custom".to_string()),
             None,
             None,
@@ -385,7 +402,7 @@ mod tests {
     #[test]
     fn args_random_values() {
         let args = Figment::from(Args::new(
-            Some("/etc/polar/polar.toml".to_string()),
+            None,
             None,
             Some("192.168.1.42".to_string()),
             Some(4200),
@@ -408,21 +425,21 @@ mod tests {
 
         let config = config_result.unwrap();
 
-        assert_eq!(config.address.as_str(), "192.168.1.42");
+        assert_eq!(config.address, "192.168.1.42");
         assert_eq!(config.port, 4200);
-        assert_eq!(config.database.host.as_str(), "42.42.42.42");
+        assert_eq!(config.database.host, "42.42.42.42");
         assert_eq!(config.database.port, 4242);
-        assert_eq!(config.database.user.as_str(), "test");
-        assert_eq!(config.database.password.as_str(), "test");
-        assert_eq!(config.database.schema.as_str(), "test");
-        assert_eq!(config.security.jwt_secret.as_str(), "secret");
+        assert_eq!(config.database.user, "test");
+        assert_eq!(config.database.password, "test");
+        assert_eq!(config.database.schema, "test");
+        assert_eq!(config.security.jwt_secret, "secret");
         assert_eq!(config.security.jwt_lifetime, 42);
     }
 
     #[test]
     fn args_random_values_missing() {
         let args = Figment::from(Args::new(
-            Some("/etc/polar/polar.toml".to_string()),
+            None,
             None,
             Some("192.168.1.42".to_string()),
             Some(4200),
@@ -446,14 +463,14 @@ mod tests {
         let config = config_result.unwrap();
         let default_config = Config::default();
 
-        assert_eq!(config.address.as_str(), "192.168.1.42");
+        assert_eq!(config.address, "192.168.1.42");
         assert_eq!(config.port, 4200);
-        assert_eq!(config.database.host.as_str(), "42.42.42.42");
+        assert_eq!(config.database.host, "42.42.42.42");
         assert_eq!(config.database.port, default_config.database.port);
-        assert_eq!(config.database.user.as_str(), "test");
+        assert_eq!(config.database.user, "test");
         assert_eq!(config.database.password, default_config.database.password);
         assert_eq!(config.database.schema, default_config.database.schema);
-        assert_eq!(config.security.jwt_secret.as_str(), "secret");
+        assert_eq!(config.security.jwt_secret, "secret");
         assert_eq!(config.security.jwt_lifetime, 42);
     }
 
@@ -471,7 +488,7 @@ mod tests {
 
             let default_config = Config::default();
             let file_config: Config = Figment::from(&default_config)
-                .merge(from_file("polar.toml").unwrap())
+                .merge(from_file(Some("polar.toml")).unwrap())
                 .extract()?;
 
             assert_eq!(default_config, file_config);
@@ -494,7 +511,7 @@ mod tests {
             )?;
 
             let file_config =
-                Figment::from(Config::default()).merge(from_file("polar.toml").unwrap());
+                Figment::from(Config::default()).merge(from_file(Some("polar.toml")).unwrap());
             let default_config: Config =
                 file_config.clone().select(Profile::default()).extract()?;
             let custom_config: Config = file_config
@@ -542,14 +559,69 @@ mod tests {
             }
             let config: Config = config_result.unwrap().extract()?;
 
-            assert_eq!(config.address.as_str(), "42.42.42.42");
+            assert_eq!(config.address, "42.42.42.42");
 
             Ok(())
         })
     }
 
     #[test]
-    fn args_precedence_over_file() {
+    fn args_specify_nonexistent_file() {
+        let args = Args::new(
+            Some("i_definitely_dont_exist.toml".to_string()),
+            None,
+            Some("192.168.1.42".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(Config::figment(args).is_err())
+    }
+
+    // Env
+
+    #[test]
+    fn env_select_profile() {
+        Jail::expect_with(|jail| {
+            jail.set_env("POLAR_PROFILE", "custom");
+            let config = Config::figment(Args::empty()).unwrap();
+            assert_eq!(config.profile(), "custom");
+
+            Ok(())
+        })
+    }
+
+    // Precedence
+
+    #[test]
+    fn precedence_env_over_file() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                "polar.toml",
+                r#"
+                [default]
+                address = "42.42.42.42"
+                "#,
+            )?;
+
+            jail.set_env("POLAR_ADDRESS", "0.0.0.0");
+            let figment = Config::figment(Args::empty()).unwrap();
+            let config: Config = figment.extract()?;
+
+            assert_eq!(config.address, "0.0.0.0");
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn precedence_args_over_file() {
         Jail::expect_with(|jail| {
             let args = Args::new(
                 Some("polar.toml".to_string()),
@@ -587,21 +659,71 @@ mod tests {
     }
 
     #[test]
-    fn args_specify_nonexistent_file() {
-        let args = Args::new(
-            Some("i_definitely_dont_exist.toml".to_string()),
-            None,
-            Some("192.168.1.42".to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+    fn precedence_args_over_env() {
+        Jail::expect_with(|jail| {
+            let args = Args::new(
+                None,
+                None,
+                Some("192.168.1.42".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
 
-        assert!(Config::figment(args).is_err())
+            jail.set_env("POLAR_ADDRESS", "0.0.0.0");
+
+            let figment = Config::figment(args).unwrap();
+            let config: Config = figment.extract()?;
+
+            assert_eq!(config.address, "192.168.1.42");
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn precedence_args_over_env_over_file() {
+        Jail::expect_with(|jail| {
+            jail.create_file(
+                "polar.toml",
+                r#"
+                [default]
+                address = "1.1.1.1"
+                port = 1111
+                [default.database]
+                host = "1.1.1.1"
+                "#,
+            )?;
+
+            jail.set_env("POLAR_ADDRESS", "2.2.2.2");
+            jail.set_env("POLAR_PORT", "2222");
+
+            let args = Args::new(
+                Some("polar.toml".to_string()),
+                None,
+                Some("3.3.3.3".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            let figment = Config::figment(args).unwrap();
+            let config: Config = figment.select("default").extract()?;
+
+            assert_eq!(config.address, "3.3.3.3"); // Arg over env over file
+            assert_eq!(config.port, 2222); // env over file
+            assert_eq!(config.database.host, "1.1.1.1"); // file
+
+            Ok(())
+        })
     }
 }

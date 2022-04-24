@@ -1,6 +1,6 @@
-use polar_library::app;
-use polar_library::lib::config::{Args, Config};
-use polar_library::lib::database::DbConnection;
+use polar::app;
+use polar::lib::config::{Args, Config};
+use polar::lib::database::DbConnection;
 
 use clap::Parser;
 use rocket::fairing::AdHoc;
