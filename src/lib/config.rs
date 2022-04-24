@@ -262,7 +262,7 @@ impl Default for SecurityConfig {
 /// configuration file but was overridden to be 600 seconds when the app was
 /// started.
 ///
-/// ```rust,no_run
+/// ```rust,no_run,compile_fail
 /// use rocket::State;
 /// use polar::config::Config;
 ///
