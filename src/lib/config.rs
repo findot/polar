@@ -3,19 +3,15 @@ use std::io::{Error as IOError, ErrorKind};
 use std::path::Path;
 
 use figment::{
-    Error as FigmentError,
-    Figment,
     map,
-    Metadata,
-    Profile,
-    Provider,
     providers::{Env, Format, Serialized, Toml},
     value::{Dict, Map},
+    Error as FigmentError, Figment, Metadata, Profile, Provider,
 };
 use serde::{Deserialize, Serialize};
 
-use super::result::Error;
 use super::cli::Cli;
+use super::result::Error;
 
 /* -------------------------------------- Util functions --------------------------------------- */
 
@@ -118,7 +114,7 @@ impl Default for SecurityConfig {
 /// _"POLAR\_"_ (_e.g_ __POLAR_PORT__) will be read as a candidate for
 /// configuration.
 /// 4. __Program arguments__: Any user provided arguments at application
-/// startup will be parsed as an [Args] structure which will subsequently see
+/// startup will be parsed as an [Cli] structure which will subsequently see
 /// a subset of its data converted to configuration values.
 ///
 /// # Example
@@ -170,12 +166,12 @@ impl Provider for Config {
     }
 }
 
-impl<'a> Config {
+impl Config {
     pub fn from<T: Provider>(provider: T) -> Result<Config, FigmentError> {
         Figment::from(provider).extract()
     }
 
-    pub fn figment(cli: Cli) -> Result<Figment, Error<'a>> {
+    pub fn figment<'a>(cli: &Cli) -> Result<Figment, Error<'a>> {
         let base = Figment::from(rocket::Config::default());
 
         let profile = cli
@@ -185,13 +181,13 @@ impl<'a> Config {
         let default_config = Figment::from(Serialized::defaults(Config::default()));
         let file_config = from_file(cli.configuration.as_ref().map(String::as_str))?;
         let env_config = Figment::from(Env::prefixed("POLAR_"));
-        let args_config = Figment::from(cli);
+        let cli_config = Figment::from(cli);
 
         let config = base
             .merge(default_config)
             .merge(file_config)
             .merge(env_config)
-            .merge(args_config)
+            .merge(cli_config)
             .select(profile.as_str());
 
         Ok(with_db_pool(config)?.select(profile.as_str()))
@@ -203,8 +199,8 @@ impl<'a> Config {
 #[cfg(test)]
 mod tests {
     use super::{
-        Config,
         super::cli::{Cli, Command, Serve},
+        Config,
     };
     use crate::lib::config::from_file;
     use figment::{Error as FigmentError, Figment, Jail, Profile};
@@ -235,12 +231,14 @@ mod tests {
                 database_schema,
                 jwt_secret,
                 jwt_lifetime,
-            })
+            }),
         }
     }
 
     fn empty_cli() -> Cli {
-        cli(None, None, None, None, None, None, None, None, None, None, None, )
+        cli(
+            None, None, None, None, None, None, None, None, None, None, None,
+        )
     }
 
     // Arguments tests
@@ -453,7 +451,7 @@ mod tests {
             "#,
             )?;
 
-            let config_result = Config::figment(args);
+            let config_result = Config::figment(&args);
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -482,7 +480,7 @@ mod tests {
             None,
         );
 
-        assert!(Config::figment(args).is_err())
+        assert!(Config::figment(&args).is_err())
     }
 
     // Env
@@ -491,7 +489,7 @@ mod tests {
     fn env_select_profile() {
         Jail::expect_with(|jail| {
             jail.set_env("POLAR_PROFILE", "custom");
-            let config = Config::figment(empty_cli()).unwrap();
+            let config = Config::figment(&empty_cli()).unwrap();
             assert_eq!(config.profile(), "custom");
 
             Ok(())
@@ -512,7 +510,7 @@ mod tests {
             )?;
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
-            let figment = Config::figment(empty_cli()).unwrap();
+            let figment = Config::figment(&empty_cli()).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "0.0.0.0");
@@ -546,7 +544,7 @@ mod tests {
                 "#,
             )?;
 
-            let config_result = Config::figment(args);
+            let config_result = Config::figment(&args);
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -578,7 +576,7 @@ mod tests {
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
 
-            let figment = Config::figment(args).unwrap();
+            let figment = Config::figment(&args).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "192.168.1.42");
@@ -617,7 +615,7 @@ mod tests {
                 None,
                 None,
             );
-            let figment = Config::figment(args).unwrap();
+            let figment = Config::figment(&args).unwrap();
             let config: Config = figment.select("default").extract()?;
 
             assert_eq!(config.address, "3.3.3.3"); // Arg over env over file

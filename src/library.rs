@@ -1,8 +1,10 @@
 #[macro_use]
 extern crate rocket;
+#[macro_use]
+extern crate diesel_migrations;
 
 pub mod app;
-pub mod lib;
+mod lib;
 
 pub use lib::api;
 pub use lib::cli;

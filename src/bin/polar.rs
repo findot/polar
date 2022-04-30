@@ -1,25 +1,55 @@
 extern crate core;
 
-use polar::app;
-use polar::lib::{config::Config, cli::Cli, cli::Command};
-use polar::lib::database::DbConnection;
-
 use clap::Parser;
-use rocket::fairing::AdHoc;
-use rocket::{launch, Build, Rocket};
+use std::process::exit;
 
-#[launch]
-fn rocket() -> Rocket<Build> {
+use polar::app;
+use polar::{
+    cli::{Cli, Command, DumpFormat},
+    config::Config,
+    database::{migrate as db_migrate, DbConnection},
+    result::Result,
+};
+
+use rocket;
+use rocket::fairing::AdHoc;
+
+async fn serve<'a>(args: &Cli) -> Result<'a, ()> {
+    let config = Config::figment(args)?;
+    let result = rocket::custom(config)
+        .attach(AdHoc::config::<Config>())
+        .attach(DbConnection::fairing())
+        .mount("/", app::routes::collect())
+        .launch()
+        .await?;
+    Ok(result)
+}
+
+fn migrate<'a>(args: &Cli) -> Result<'a, ()> {
+    let figment = Config::figment(args)?;
+    let config: Config = figment.extract()?;
+    db_migrate(&config.database, true)?;
+    Ok(())
+}
+
+fn show_conf<'a>(args: &Cli, format: Option<DumpFormat>) -> Result<'a, ()> {
+    let fmt = format.unwrap_or(DumpFormat::Json);
+    let figment = Config::figment(args)?;
+    let config: Config = figment.extract()?;
+    println!("{}", fmt.to_string(&config)?);
+    Ok(())
+}
+
+#[rocket::main]
+async fn main() {
     let args: Cli = Cli::parse();
 
-    match &args.command {
-        Command::Serve(_) => {
-            let config = Config::figment(args).unwrap(); // TODO - Handle error
-            rocket::custom(config)
-                .attach(AdHoc::config::<Config>())
-                .attach(DbConnection::fairing())
-                .mount("/", app::routes::collect())
-        },
-        Command::Migrate(_) => panic!("Not implemented")
+    if let Err(e) = match &args.command {
+        Command::Serve(_) => serve(&args).await,
+        Command::Migrate(_) => migrate(&args),
+        Command::Show(show) => show_conf(&args, show.format),
+    } {
+        eprintln!("Error: {}", e.to_string());
+        exit(1);
     }
 }

@@ -1,13 +1,14 @@
-use std::collections::BTreeMap;
-use clap::{Args, Parser, Subcommand};
+use crate::result::SerdeError;
+use clap::{ArgEnum, Args, Parser, Subcommand};
 use figment::{
-    Error as FigmentError,
     map,
-    Metadata,
-    Profile,
-    Provider,
     value::{Dict, Map, Value},
+    Error as FigmentError, Metadata, Profile, Provider,
 };
+use serde::{Deserialize, Serialize};
+use serde_xml_rs as serde_xml;
+use std::collections::BTreeMap;
+use toml as serde_toml;
 
 /* -------------------------------------- Util functions --------------------------------------- */
 
@@ -48,33 +49,47 @@ fn serve_data<'a>(data: &Serve) -> Map<&'a str, Value> {
         "jwt_lifetime" => data.jwt_lifetime.map(Value::from)
     };
 
-     filter_none(map! {
+    filter_none(map! {
         "address" => ref_str(&data.address).map(Value::from),
         "port" => data.port.map(Value::from),
         "database" => Some(filter_none(database).into()),
         "security" => Some(filter_none(security).into()),
     })
-
 }
 
+#[inline]
+fn serve_dump<'a>(data: &Show) -> Map<&'a str, Value> {
+    let fmt = data.format.unwrap_or(DumpFormat::Json);
+    map!["format" => Value::serialize(fmt).unwrap()]
+}
+
+/* ------------------------------------------ Format ------------------------------------------- */
+
+/// The file format in which the configuration should be dumped
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum, Serialize, Deserialize)]
+pub enum DumpFormat {
+    Json,
+    Yaml,
+    Toml,
+    Xml,
+}
+
+impl DumpFormat {
+    pub fn to_string<T: Serialize>(&self, value: &T) -> Result<String, SerdeError> {
+        Ok(match self {
+            DumpFormat::Json => serde_json::to_string(value)?,
+            DumpFormat::Yaml => serde_yaml::to_string(value)?,
+            DumpFormat::Xml => serde_xml::to_string(value)?,
+            DumpFormat::Toml => serde_toml::to_string(value)?,
+        })
+    }
+}
 
 /* --------------------------------------- Args Parsing ---------------------------------------- */
 
-#[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
-pub struct Cli {
-    /// Configuration file path
-    #[clap(short = 'C', long)]
-    pub configuration: Option<String>,
+// Migrate
 
-    /// Configuration profile to use
-    #[clap(short = 'P', long)]
-    pub profile: Option<String>,
-
-    #[clap(subcommand)]
-    pub command: Command
-}
-
+/// Update Polar database to its latest version
 #[derive(Args)]
 pub struct Migrate {
     /// Database IP address to connect to
@@ -98,6 +113,9 @@ pub struct Migrate {
     pub database_schema: Option<String>,
 }
 
+// Serve
+
+/// Start Polar webserver
 #[derive(Args)]
 pub struct Serve {
     /// IP address to bind to
@@ -137,10 +155,66 @@ pub struct Serve {
     pub jwt_lifetime: Option<u16>,
 }
 
+impl Default for Serve {
+    fn default() -> Self {
+        Serve {
+            address: None,
+            port: None,
+            database_host: None,
+            database_port: None,
+            database_user: None,
+            database_password: None,
+            database_schema: None,
+            jwt_secret: None,
+            jwt_lifetime: None,
+        }
+    }
+}
+
+// Show
+
+/// Dump Polar current active configuration to standard output
+#[derive(Args)]
+pub struct Show {
+    /// Format of the configuration dump
+    #[clap(arg_enum, short, long)]
+    pub format: Option<DumpFormat>,
+}
+
+// Commands
+
 #[derive(Subcommand)]
 pub enum Command {
     Migrate(Migrate),
-    Serve(Serve)
+    Serve(Serve),
+    Show(Show),
+}
+
+// Args
+
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+pub struct Cli {
+    /// Configuration file path
+    #[clap(short = 'C', long)]
+    pub configuration: Option<String>,
+
+    /// Configuration profile to use
+    #[clap(short = 'P', long)]
+    pub profile: Option<String>,
+
+    #[clap(subcommand)]
+    pub command: Command,
+}
+
+impl Default for Cli {
+    fn default() -> Self {
+        Cli {
+            configuration: None,
+            profile: None,
+            command: Command::Serve(Serve::default()),
+        }
+    }
 }
 
 impl Provider for Cli {
@@ -151,10 +225,12 @@ impl Provider for Cli {
     fn data(&self) -> Result<Map<Profile, Dict>, FigmentError> {
         let data = match &self.command {
             Command::Migrate(migrate) => migrate_data(migrate),
-            Command::Serve(serve) => serve_data(serve)
-        }.into_iter()
-         .map(|(k, v)| (k.to_string(), v))
-         .collect();
+            Command::Serve(serve) => serve_data(serve),
+            Command::Show(dump) => serve_dump(dump),
+        }
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
 
         let profile_str = ref_str(&self.profile).unwrap_or("default");
         let profile = Profile::from(profile_str);
