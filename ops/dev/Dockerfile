@@ -1,7 +1,6 @@
 FROM alpine:latest
 
-ENV DUMB_INIT_VERSION=1.2.5 \
-    RUSTUP_HOME=/usr/local/rustup \
+ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     RUSTUP_URL="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-musl/rustup-init" \
@@ -10,16 +9,12 @@ ENV DUMB_INIT_VERSION=1.2.5 \
 
 # DEPENDENCIES
 RUN apk add --update --no-cache \
+    dumb-init \
     ca-certificates \
     gcc \
     musl-dev \
     libpq-dev \
     inotify-tools
-
-# DUMB-INIT
-RUN set -eux && \
-    wget -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 && \
-    chmod +x /usr/local/bin/dumb-init
 
 # CARGO & RUST
 RUN set -eux && \
@@ -42,6 +37,7 @@ VOLUME /usr/local/cargo/registry
 EXPOSE 8000
 
 ADD scripts/entrypoint.sh /
+RUN chmod a+x /entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["/entrypoint.sh"]

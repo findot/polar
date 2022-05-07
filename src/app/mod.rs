@@ -24,7 +24,7 @@ impl App {
     }
 
     pub async fn serve<'a>(&self) -> Result<'a, ()> {
-        rocket::custom(&self.config)
+        rocket::custom(&self.figment)
             .attach(AdHoc::config::<Config>())
             .attach(DbConnection::fairing())
             .mount("/", routes::collect())

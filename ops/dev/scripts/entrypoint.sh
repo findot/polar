@@ -27,12 +27,11 @@ safe_kill() {
 
 migrate() {
   log "Starting migrations... "
-  cargo install diesel_cli --no-default-features --features postgres
-  if [ -f /tmp/.redo ]; then
-    diesel migration redo
-  else
-    diesel migration run
-  fi
+#  if [ -f /tmp/.redo ]; then
+    cargo run -- -C ./ops/dev/polar.toml migrate
+#  else
+#    diesel migration run
+#  fi
   printf "Ok.\n" >&2
 }
 
@@ -40,7 +39,7 @@ start() {
   log "Starting Rust server... "
   cargo build
   mkdir -p ops/dev/log
-  cargo run > ops/dev/log/cargo.log 2>&1 &
+  cargo run -- serve > ops/dev/log/cargo.log 2>&1 &
   echo $! > /tmp/cargo.pid
   printf "Ok.\n" >&2
 }
