@@ -1,35 +1,28 @@
-use rocket::figment::Error as FigmentError;
 use std::fmt::{Display, Formatter};
 use std::io::{Error as IOError, ErrorKind};
 use std::path::Path;
 
-use clap::Parser;
 use figment::{
+    map,
     providers::{Env, Format, Serialized, Toml},
-    value::{Dict, Map, Value},
-    Figment, Metadata, Profile, Provider,
+    value::{Dict, Map},
+    Error as FigmentError, Figment, Metadata, Profile, Provider,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::lib::database;
-use crate::lib::result::Error;
+use super::cli::Cli;
+use super::result::Error;
 
 /* -------------------------------------- Util functions --------------------------------------- */
 
 pub static DEFAULT_CONF_PATH: &str = "/etc/polar/polar.toml";
 
-#[inline]
-fn ref_str(s: &Option<String>) -> Option<&str> {
-    s.as_ref().map(String::as_str)
-}
-
-#[inline]
-fn prepare_tuples(xs: Vec<(&str, Option<Value>)>) -> Vec<(String, Value)> {
-    return xs
-        .into_iter()
-        .filter(|(_, v)| v.is_some())
-        .map(|(k, v)| (k.to_string(), v.unwrap()))
-        .collect();
+pub fn with_db_pool(figment: Figment) -> Result<Figment, FigmentError> {
+    figment
+        .extract()
+        .map(|config: Config| map!["postgresql_pool" => map!["url" => config.database.to_string()]])
+        .map(|pool| Figment::from(("databases", pool)))
+        .map(|db_figment| figment.merge(db_figment))
 }
 
 /* --------------------------------------- File handling --------------------------------------- */
@@ -47,137 +40,6 @@ fn from_file(file_path: Option<&str>) -> Result<Figment, IOError> {
             format!("{}, is a directory", path_str),
         )),
         true => Ok(Figment::from(Toml::file(path).nested())),
-    }
-}
-
-/* --------------------------------------- Args Parsing ---------------------------------------- */
-
-#[derive(Parser, Debug)]
-#[clap(
-    author = "findot",
-    version = "0.0.1",
-    about = "TODO",
-    long_about = "TODO"
-)]
-pub struct Args {
-    /// Configuration file path
-    #[clap(short, long)]
-    configuration: Option<String>,
-
-    /// Configuration profile to use
-    #[clap(long)]
-    profile: Option<String>,
-
-    /// IP address to bind to
-    #[clap(short, long)]
-    address: Option<String>,
-
-    /// Port number to use for connection or 0 for default
-    #[clap(short, long)]
-    port: Option<u16>,
-
-    /// Database IP address to connect to
-    #[clap(long)]
-    database_host: Option<String>,
-
-    /// Database port number to connect to
-    #[clap(long)]
-    database_port: Option<u16>,
-
-    /// Username with which polar will authenticate to the database
-    #[clap(long)]
-    database_user: Option<String>,
-
-    /// Password with which polar will authenticate to the database
-    #[clap(long)]
-    database_password: Option<String>,
-
-    /// Database schema to use
-    #[clap(long)]
-    database_schema: Option<String>,
-
-    /// Seed of the jwt generation
-    #[clap(long)]
-    jwt_secret: Option<String>,
-
-    /// Lifespan (in seconds) during which any emitted jwt token will be valid
-    #[clap(long)]
-    jwt_lifetime: Option<u16>,
-}
-
-impl Provider for Args {
-    fn metadata(&self) -> Metadata {
-        Metadata::named("Arguments")
-    }
-
-    fn data(&self) -> Result<Map<Profile, Dict>, FigmentError> {
-        let database = Dict::from_iter(prepare_tuples(vec![
-            ("host", ref_str(&self.database_host).map(Value::from)),
-            ("port", self.database_port.map(Value::from)),
-            ("user", ref_str(&self.database_user).map(Value::from)),
-            (
-                "password",
-                ref_str(&self.database_password).map(Value::from),
-            ),
-            ("schema", ref_str(&self.database_schema).map(Value::from)),
-        ]));
-
-        let security = Dict::from_iter(prepare_tuples(vec![
-            ("jwt_secret", ref_str(&self.jwt_secret).map(Value::from)),
-            ("jwt_lifetime", self.jwt_lifetime.map(Value::from)),
-        ]));
-
-        let root = Dict::from_iter(prepare_tuples(vec![
-            ("address", ref_str(&self.address).map(Value::from)),
-            ("port", self.port.map(Value::from)),
-            ("database", Some(Value::from(database))),
-            ("security", Some(Value::from(security))),
-        ]));
-
-        let profile_str = ref_str(&self.profile).unwrap_or("default");
-
-        let profile = Profile::from(profile_str);
-        Ok(Map::from_iter(vec![(profile, root)]))
-    }
-
-    fn profile(&self) -> Option<Profile> {
-        self.profile.as_ref().map(|p| Profile::new(p.as_str()))
-    }
-}
-
-impl Args {
-    fn new(
-        configuration: Option<String>,
-        profile: Option<String>,
-        address: Option<String>,
-        port: Option<u16>,
-        database_host: Option<String>,
-        database_port: Option<u16>,
-        database_user: Option<String>,
-        database_password: Option<String>,
-        database_schema: Option<String>,
-        jwt_secret: Option<String>,
-        jwt_lifetime: Option<u16>,
-    ) -> Self {
-        Args {
-            configuration,
-            profile,
-            address,
-            port,
-            database_host,
-            database_port,
-            database_user,
-            database_password,
-            database_schema,
-            jwt_secret,
-            jwt_lifetime,
-        }
-    }
-
-    fn empty() -> Self {
-        Self::new(
-            None, None, None, None, None, None, None, None, None, None, None,
-        )
     }
 }
 
@@ -252,7 +114,7 @@ impl Default for SecurityConfig {
 /// _"POLAR\_"_ (_e.g_ __POLAR_PORT__) will be read as a candidate for
 /// configuration.
 /// 4. __Program arguments__: Any user provided arguments at application
-/// startup will be parsed as an [Args] structure which will subsequently see
+/// startup will be parsed as an [Cli] structure which will subsequently see
 /// a subset of its data converted to configuration values.
 ///
 /// # Example
@@ -304,33 +166,31 @@ impl Provider for Config {
     }
 }
 
-impl<'a> Config {
+impl Config {
     pub fn from<T: Provider>(provider: T) -> Result<Config, FigmentError> {
         Figment::from(provider).extract()
     }
 
-    pub fn figment(args: Args) -> Result<Figment, Error<'a>> {
+    pub fn figment<'a>(cli: &Cli) -> Result<Figment, Error<'a>> {
         let base = Figment::from(rocket::Config::default());
 
-        let profile = args
-            .profile
-            .as_ref()
-            .map(Profile::from)
+        let profile = cli
+            .profile()
             .unwrap_or(Profile::from_env_or("POLAR_PROFILE", "default"));
 
         let default_config = Figment::from(Serialized::defaults(Config::default()));
-        let file_config = from_file(args.configuration.as_ref().map(String::as_str))?;
+        let file_config = from_file(cli.configuration.as_ref().map(String::as_str))?;
         let env_config = Figment::from(Env::prefixed("POLAR_"));
-        let args_config = Figment::from(args);
+        let cli_config = Figment::from(cli);
 
         let config = base
             .merge(default_config)
             .merge(file_config)
             .merge(env_config)
-            .merge(args_config)
+            .merge(cli_config)
             .select(profile.as_str());
 
-        Ok(database::with_pool(config)?.select(profile.as_str()))
+        Ok(with_db_pool(config)?.select(profile.as_str()))
     }
 }
 
@@ -338,15 +198,54 @@ impl<'a> Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{Args, Config};
+    use super::{
+        super::cli::{Cli, Command, Serve},
+        Config,
+    };
     use crate::lib::config::from_file;
     use figment::{Error as FigmentError, Figment, Jail, Profile};
+
+    fn cli(
+        configuration: Option<String>,
+        profile: Option<String>,
+        address: Option<String>,
+        port: Option<u16>,
+        database_host: Option<String>,
+        database_port: Option<u16>,
+        database_user: Option<String>,
+        database_password: Option<String>,
+        database_schema: Option<String>,
+        jwt_secret: Option<String>,
+        jwt_lifetime: Option<u16>,
+    ) -> Cli {
+        Cli {
+            configuration,
+            profile,
+            command: Command::Serve(Serve {
+                address,
+                port,
+                database_host,
+                database_port,
+                database_user,
+                database_password,
+                database_schema,
+                jwt_secret,
+                jwt_lifetime,
+            }),
+        }
+    }
+
+    fn empty_cli() -> Cli {
+        cli(
+            None, None, None, None, None, None, None, None, None, None, None,
+        )
+    }
 
     // Arguments tests
 
     #[test]
     fn empty_arguments() {
-        let args = Figment::from(Args::empty());
+        let args = Figment::from(empty_cli());
 
         let figment = Figment::from(Config::default()).merge(args);
         let config: Result<Config, FigmentError> = figment.extract();
@@ -359,7 +258,7 @@ mod tests {
 
     #[test]
     fn args_default_profile() {
-        let args = Figment::from(Args::new(
+        let args = Figment::from(cli(
             None,
             Some("default".to_string()),
             None,
@@ -380,7 +279,7 @@ mod tests {
 
     #[test]
     fn args_custom_profile() {
-        let args = Figment::from(Args::new(
+        let args = Figment::from(cli(
             None,
             Some("custom".to_string()),
             None,
@@ -401,7 +300,7 @@ mod tests {
 
     #[test]
     fn args_random_values() {
-        let args = Figment::from(Args::new(
+        let args = Figment::from(cli(
             None,
             None,
             Some("192.168.1.42".to_string()),
@@ -438,7 +337,7 @@ mod tests {
 
     #[test]
     fn args_random_values_missing() {
-        let args = Figment::from(Args::new(
+        let args = Figment::from(cli(
             None,
             None,
             Some("192.168.1.42".to_string()),
@@ -530,7 +429,7 @@ mod tests {
     #[test]
     fn args_select_config_file() {
         Jail::expect_with(|jail| {
-            let args = Args::new(
+            let args = cli(
                 Some("polar.toml".to_string()),
                 None,
                 None,
@@ -552,7 +451,7 @@ mod tests {
             "#,
             )?;
 
-            let config_result = Config::figment(args);
+            let config_result = Config::figment(&args);
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -567,7 +466,7 @@ mod tests {
 
     #[test]
     fn args_specify_nonexistent_file() {
-        let args = Args::new(
+        let args = cli(
             Some("i_definitely_dont_exist.toml".to_string()),
             None,
             Some("192.168.1.42".to_string()),
@@ -581,7 +480,7 @@ mod tests {
             None,
         );
 
-        assert!(Config::figment(args).is_err())
+        assert!(Config::figment(&args).is_err())
     }
 
     // Env
@@ -590,7 +489,7 @@ mod tests {
     fn env_select_profile() {
         Jail::expect_with(|jail| {
             jail.set_env("POLAR_PROFILE", "custom");
-            let config = Config::figment(Args::empty()).unwrap();
+            let config = Config::figment(&empty_cli()).unwrap();
             assert_eq!(config.profile(), "custom");
 
             Ok(())
@@ -611,7 +510,7 @@ mod tests {
             )?;
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
-            let figment = Config::figment(Args::empty()).unwrap();
+            let figment = Config::figment(&empty_cli()).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "0.0.0.0");
@@ -623,7 +522,7 @@ mod tests {
     #[test]
     fn precedence_args_over_file() {
         Jail::expect_with(|jail| {
-            let args = Args::new(
+            let args = cli(
                 Some("polar.toml".to_string()),
                 None,
                 Some("192.168.1.42".to_string()),
@@ -645,7 +544,7 @@ mod tests {
                 "#,
             )?;
 
-            let config_result = Config::figment(args);
+            let config_result = Config::figment(&args);
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -661,7 +560,7 @@ mod tests {
     #[test]
     fn precedence_args_over_env() {
         Jail::expect_with(|jail| {
-            let args = Args::new(
+            let args = cli(
                 None,
                 None,
                 Some("192.168.1.42".to_string()),
@@ -677,7 +576,7 @@ mod tests {
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
 
-            let figment = Config::figment(args).unwrap();
+            let figment = Config::figment(&args).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "192.168.1.42");
@@ -703,7 +602,7 @@ mod tests {
             jail.set_env("POLAR_ADDRESS", "2.2.2.2");
             jail.set_env("POLAR_PORT", "2222");
 
-            let args = Args::new(
+            let args = cli(
                 Some("polar.toml".to_string()),
                 None,
                 Some("3.3.3.3".to_string()),
@@ -716,7 +615,7 @@ mod tests {
                 None,
                 None,
             );
-            let figment = Config::figment(args).unwrap();
+            let figment = Config::figment(&args).unwrap();
             let config: Config = figment.select("default").extract()?;
 
             assert_eq!(config.address, "3.3.3.3"); // Arg over env over file
