@@ -118,6 +118,7 @@ impl From<SerdeTomlError> for SerdeError {
 pub enum DatabaseError {
     ConnectionError(ConnectionError),
     MigrationError(RunMigrationsError),
+    ParsingError
 }
 
 impl Display for DatabaseError {
@@ -125,6 +126,7 @@ impl Display for DatabaseError {
         match self {
             DatabaseError::ConnectionError(ce) => Display::fmt(ce, f),
             DatabaseError::MigrationError(rme) => Display::fmt(rme, f),
+            DatabaseError::ParsingError => Display::fmt("Unable to convert database type", f)
         }
     }
 }
@@ -134,6 +136,7 @@ impl StdError for DatabaseError {
         match self {
             DatabaseError::ConnectionError(ce) => ce.source(),
             DatabaseError::MigrationError(rme) => rme.source(),
+            DatabaseError::ParsingError => None
         }
     }
 }

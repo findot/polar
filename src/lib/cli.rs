@@ -13,11 +13,6 @@ use toml as serde_toml;
 /* -------------------------------------- Util functions --------------------------------------- */
 
 #[inline]
-fn ref_str(s: &Option<String>) -> Option<&str> {
-    s.as_ref().map(String::as_str)
-}
-
-#[inline]
 fn filter_none<K: Ord, V>(mut dict: BTreeMap<K, Option<V>>) -> BTreeMap<K, V> {
     dict.retain(|_, v| v.is_some());
     dict.into_iter().map(|(k, v)| (k, v.unwrap())).collect()
@@ -26,31 +21,31 @@ fn filter_none<K: Ord, V>(mut dict: BTreeMap<K, Option<V>>) -> BTreeMap<K, V> {
 #[inline]
 fn migrate_data<'a>(data: &Migrate) -> Map<&'a str, Value> {
     filter_none(map! {
-        "host" => ref_str(&data.database_host).map(Value::from),
+        "host" => data.database_host.as_deref().map(Value::from),
         "port" => data.database_port.map(Value::from),
-        "user" => ref_str(&data.database_user).map(Value::from),
-        "password" => ref_str(&data.database_password).map(Value::from),
-        "schema" => ref_str(&data.database_schema).map(Value::from)
+        "user" => data.database_user.as_deref().map(Value::from),
+        "password" => data.database_password.as_deref().map(Value::from),
+        "schema" => data.database_schema.as_deref().map(Value::from)
     })
 }
 
 #[inline]
 fn serve_data<'a>(data: &Serve) -> Map<&'a str, Value> {
     let database = map! {
-        "host" => ref_str(&data.database_host).map(Value::from),
+        "host" => data.database_host.as_deref().map(Value::from),
         "port" => data.database_port.map(Value::from),
-        "user" => ref_str(&data.database_user).map(Value::from),
-        "password" => ref_str(&data.database_password).map(Value::from),
-        "schema" => ref_str(&data.database_schema).map(Value::from)
+        "user" => data.database_user.as_deref().map(Value::from),
+        "password" => data.database_password.as_deref().map(Value::from),
+        "schema" => data.database_schema.as_deref().map(Value::from)
     };
 
     let security = map! {
-        "jwt_secret" => ref_str(&data.jwt_secret).map(Value::from),
+        "jwt_secret" => data.jwt_secret.as_deref().map(Value::from),
         "jwt_lifetime" => data.jwt_lifetime.map(Value::from)
     };
 
     filter_none(map! {
-        "address" => ref_str(&data.address).map(Value::from),
+        "address" => data.address.as_deref().map(Value::from),
         "port" => data.port.map(Value::from),
         "database" => Some(filter_none(database).into()),
         "security" => Some(filter_none(security).into()),
@@ -116,7 +111,7 @@ pub struct Migrate {
 // Serve
 
 /// Start Polar webserver
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct Serve {
     /// IP address to bind to
     #[clap(short, long)]
@@ -153,22 +148,6 @@ pub struct Serve {
     /// Lifespan (in seconds) during which any emitted jwt token will be valid
     #[clap(short = 'l', long)]
     pub jwt_lifetime: Option<u16>,
-}
-
-impl Default for Serve {
-    fn default() -> Self {
-        Serve {
-            address: None,
-            port: None,
-            database_host: None,
-            database_port: None,
-            database_user: None,
-            database_password: None,
-            database_schema: None,
-            jwt_secret: None,
-            jwt_lifetime: None,
-        }
-    }
 }
 
 // Show
@@ -232,7 +211,7 @@ impl Provider for Cli {
         .map(|(k, v)| (k.to_string(), v))
         .collect();
 
-        let profile_str = ref_str(&self.profile).unwrap_or("default");
+        let profile_str = self.profile.as_deref().unwrap_or("default");
         let profile = Profile::from(profile_str);
 
         Ok(map![profile => data])

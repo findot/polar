@@ -176,10 +176,10 @@ impl Config {
 
         let profile = cli
             .profile()
-            .unwrap_or(Profile::from_env_or("POLAR_PROFILE", "default"));
+            .unwrap_or_else(|| Profile::from_env_or("POLAR_PROFILE", "default"));
 
         let default_config = Figment::from(Serialized::defaults(Config::default()));
-        let file_config = from_file(cli.configuration.as_ref().map(String::as_str))?;
+        let file_config = from_file(cli.configuration.as_deref())?;
         let env_config = Figment::from(Env::prefixed("POLAR_"));
         let cli_config = Figment::from(cli);
 
@@ -205,6 +205,7 @@ mod tests {
     use crate::lib::config::from_file;
     use figment::{Error as FigmentError, Figment, Jail, Profile};
 
+    #[allow(clippy::too_many_arguments)]
     fn cli(
         configuration: Option<String>,
         profile: Option<String>,
@@ -250,10 +251,7 @@ mod tests {
         let figment = Figment::from(Config::default()).merge(args);
         let config: Result<Config, FigmentError> = figment.extract();
 
-        match config {
-            Ok(_) => assert!(true),
-            Err(e) => assert!(false, "{}", e),
-        }
+        let _ = config.map_err(|e| panic!("{}", e));
     }
 
     #[test]
@@ -317,10 +315,7 @@ mod tests {
         let figment = Figment::from(Config::default()).merge(args);
         let config_result: Result<Config, FigmentError> = figment.extract();
 
-        match &config_result {
-            Ok(_) => assert!(true),
-            Err(e) => assert!(false, "{}", e),
-        };
+        let _ = config_result.as_ref().map_err(|e| panic!("{}", e));
 
         let config = config_result.unwrap();
 
@@ -354,10 +349,7 @@ mod tests {
         let figment = Figment::from(Config::default()).merge(args);
         let config_result: Result<Config, FigmentError> = figment.extract();
 
-        match &config_result {
-            Ok(_) => assert!(true),
-            Err(e) => assert!(false, "{}", e),
-        };
+        let _ = config_result.as_ref().map_err(|e| panic!("{}", e));
 
         let config = config_result.unwrap();
         let default_config = Config::default();
@@ -413,10 +405,7 @@ mod tests {
                 Figment::from(Config::default()).merge(from_file(Some("polar.toml")).unwrap());
             let default_config: Config =
                 file_config.clone().select(Profile::default()).extract()?;
-            let custom_config: Config = file_config
-                .clone()
-                .select(Profile::new("custom"))
-                .extract()?;
+            let custom_config: Config = file_config.select(Profile::new("custom")).extract()?;
 
             assert_ne!(default_config.address, custom_config.address);
 
@@ -452,10 +441,7 @@ mod tests {
             )?;
 
             let config_result = Config::figment(&args);
-            match &config_result {
-                Ok(_) => assert!(true),
-                Err(e) => assert!(false, "{}", e),
-            }
+            let _ = config_result.as_ref().map_err(|e| panic!("{}", e));
             let config: Config = config_result.unwrap().extract()?;
 
             assert_eq!(config.address, "42.42.42.42");
@@ -545,10 +531,7 @@ mod tests {
             )?;
 
             let config_result = Config::figment(&args);
-            match &config_result {
-                Ok(_) => assert!(true),
-                Err(e) => assert!(false, "{}", e),
-            }
+            let _ = config_result.as_ref().map_err(|e| panic!("{}", e));
             let config: Config = config_result.unwrap().extract()?;
 
             assert_eq!(config.address.as_str(), "192.168.1.42");

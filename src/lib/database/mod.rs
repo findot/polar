@@ -1,8 +1,12 @@
 use crate::config::DatabaseConfig;
 use crate::result::DatabaseError;
-use diesel::{pg::PgConnection, Connection, ConnectionResult};
+use diesel::{Connection, ConnectionResult, pg::PgConnection};
 use diesel_migrations::embed_migrations;
 use rocket_sync_db_pools::database;
+
+pub mod schema;
+pub mod models;
+pub mod types;
 
 #[database("postgresql_pool")]
 pub struct DbConnection(PgConnection);

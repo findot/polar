@@ -3,7 +3,7 @@
 //! Group all routes of the application, classified by module, respecting the
 //! route path.
 
-mod api;
+pub mod v1;
 
 use rocket::Route;
 
