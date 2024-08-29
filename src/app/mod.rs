@@ -1,11 +1,11 @@
 use std::process::exit;
 
-use figment::Figment;
-use rocket::fairing::AdHoc;
 use crate::cli::{Cli, Command, DumpFormat};
 use crate::config::Config;
-use crate::database::{DbConnection, migrate as db_migrate};
+use crate::database::{migrate as db_migrate, DbConnection};
 use crate::result::Result;
+use figment::Figment;
+use rocket::fairing::AdHoc;
 
 pub mod core;
 pub mod routes;
@@ -20,7 +20,11 @@ impl App {
     pub fn new<'a>(args: Cli) -> Result<'a, Self> {
         let figment = Config::figment(&args)?;
         let config: Config = figment.extract()?;
-        Ok(Self { args, figment, config })
+        Ok(Self {
+            args,
+            figment,
+            config,
+        })
     }
 
     pub async fn serve<'a>(&self) -> Result<'a, ()> {
@@ -34,7 +38,7 @@ impl App {
     }
 
     pub fn migrate<'a>(&self) -> Result<'a, ()> {
-        db_migrate(&self.config.database, true)?;
+        db_migrate(&self.config.database)?;
         Ok(())
     }
 

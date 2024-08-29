@@ -9,19 +9,25 @@ name = "polar"
 path = "src/library.rs"
 
 [dependencies]
-rocket = { version = "0.5.0-rc.1", features = ["json"] }
-dotenv = "0.15.0"
-clap = { version = "3.1.9", features = ["derive"] }
-figment = { version = "0.10.6", features = [ "env", "toml", "json", "yaml", "test" ] }
-serde = "1.0.136"
-serde_json = "1.0.79"
-serde_yaml = "0.8.23"
-serde-xml-rs = "0.5.1"
-toml = "0.5.9"
-diesel = { version = "1.4.8", features = ["postgres"] }
-diesel_migrations = "1.4.0"
+rocket = { version = "0.5.1", features = ["json"] }
+dotenvy = "0.15.7"
+clap = { version = "4.5.16", features = ["derive"] }
+figment = { version = "0.10.6", features = [
+    "env",
+    "toml",
+    "json",
+    "yaml",
+    "test",
+] }
+serde = "1.0.209"
+serde_json = "1.0.127"
+serde_yaml = "0.9.34"
+serde-xml-rs = "0.6.0"
+toml = "0.8.19"
+diesel = { version = "2.2.0", features = ["postgres"] }
+diesel_migrations = "2.2.0"
 
 [dependencies.rocket_sync_db_pools]
-version = "0.1.0-rc.1"
+version = "0.1.0"
 default-features = false
 features = ["diesel_postgres_pool"]
