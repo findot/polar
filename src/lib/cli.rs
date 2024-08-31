@@ -1,5 +1,5 @@
 use crate::result::SerdeError;
-use clap::{ArgEnum, Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use figment::{
     map,
     value::{Dict, Map, Value},
@@ -66,7 +66,7 @@ fn serve_dump<'a>(data: &Show) -> Map<&'a str, Value> {
 /* ------------------------------------------ Format ------------------------------------------- */
 
 /// The file format in which the configuration should be dumped
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Serialize, Deserialize)]
 pub enum DumpFormat {
     Json,
     Yaml,
@@ -177,7 +177,7 @@ impl Default for Serve {
 #[derive(Args)]
 pub struct Show {
     /// Format of the configuration dump
-    #[clap(arg_enum, short, long)]
+    #[clap(value_enum, short, long)]
     pub format: Option<DumpFormat>,
 }
 

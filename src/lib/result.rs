@@ -1,5 +1,4 @@
 use crate::lib::result::ConfigurationError::{MisconfiguredEntry, MissingEntry};
-use diesel::migration::RunMigrationsError;
 use diesel::ConnectionError;
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
@@ -117,7 +116,7 @@ impl From<SerdeTomlError> for SerdeError {
 #[derive(Debug)]
 pub enum DatabaseError {
     ConnectionError(ConnectionError),
-    MigrationError(RunMigrationsError),
+    MigrationError(Box<dyn StdError + Send + Sync>),
 }
 
 impl Display for DatabaseError {
@@ -144,8 +143,8 @@ impl From<ConnectionError> for DatabaseError {
     }
 }
 
-impl From<RunMigrationsError> for DatabaseError {
-    fn from(rme: RunMigrationsError) -> Self {
+impl From<Box<dyn StdError + Send + Sync>> for DatabaseError {
+    fn from(rme: Box<dyn StdError + Send + Sync>) -> Self {
         DatabaseError::MigrationError(rme)
     }
 }
