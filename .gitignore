@@ -12,3 +12,4 @@ Cargo.lock
 
 # IDE specific filespecific files
 /.idea/
+.env
