@@ -8,9 +8,11 @@ use figment::{
     value::{Dict, Map},
     Error as FigmentError, Figment, Metadata, Profile, Provider,
 };
+use rocket_db_pools::Database;
 use serde::{Deserialize, Serialize};
 
 use super::cli::Cli;
+use super::database::DbConnection;
 use super::result::Error;
 
 /* -------------------------------------- Util functions --------------------------------------- */
@@ -20,7 +22,9 @@ pub static DEFAULT_CONF_PATH: &str = "/etc/polar/polar.toml";
 pub fn with_db_pool(figment: Figment) -> Result<Figment, FigmentError> {
     figment
         .extract()
-        .map(|config: Config| map!["postgresql_pool" => map!["url" => config.database.to_string()]])
+        .map(
+            |config: Config| map![DbConnection::NAME => map!["url" => config.database.to_string()]],
+        )
         .map(|pool| Figment::from(("databases", pool)))
         .map(|db_figment| figment.merge(db_figment))
 }
@@ -54,25 +58,34 @@ pub struct DatabaseConfig {
     pub schema: String,
 }
 
+impl DatabaseConfig {
+    fn new(host: &str, port: u16, user: &str, password: &str, schema: &str) -> DatabaseConfig {
+        Self {
+            host: host.to_string(),
+            port,
+            user: user.to_string(),
+            password: password.to_string(),
+            schema: schema.to_string(),
+        }
+    }
+
+    fn url(&self) -> String {
+        format!(
+            "postgres://{}:{}@{}:{}/{}",
+            self.user, self.password, self.host, self.port, self.schema
+        )
+    }
+}
+
 impl Default for DatabaseConfig {
     fn default() -> Self {
-        DatabaseConfig {
-            host: "127.0.0.1".to_string(),
-            port: 5432,
-            user: "polar".to_string(),
-            password: "polar".to_string(),
-            schema: "polar".to_string(),
-        }
+        DatabaseConfig::new("127.0.0.1", 5432, "polar", "polar", "polar")
     }
 }
 
 impl Display for DatabaseConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "postgres://{}:{}@{}:{}/{}",
-            self.user, self.password, self.host, self.port, self.schema
-        )
+        write!(f, "{}", self.url())
     }
 }
 
@@ -114,15 +127,14 @@ impl Default for SecurityConfig {
 /// _"POLAR\_"_ (_e.g_ __POLAR_PORT__) will be read as a candidate for
 /// configuration.
 /// 4. __Program arguments__: Any user provided arguments at application
-/// startup will be parsed as an [Cli] structure which will subsequently see
+/// startup will be parsed as a [Cli] structure which will subsequently see
 /// a subset of its data converted to configuration values.
 ///
 /// # Example
 ///
 /// As an example, consider and endpoint that would consume the configured jwt
-/// lifetime in and endpoint. The token lifetime was set to 900 seconds in the
-/// configuration file but was overridden to be 600 seconds when the app was
-/// started.
+/// lifetime. The token lifetime was set to 900 seconds in the configuration
+/// file but was overridden to be 600 seconds when the app was started.
 ///
 /// ```rust,no_run,compile_fail
 /// use rocket::State;
@@ -588,6 +600,7 @@ mod tests {
     #[test]
     fn precedence_args_over_env_over_file() {
         Jail::expect_with(|jail| {
+            jail.set_env("POLAR_PROFILE", "dev");
             jail.create_file(
                 "polar.toml",
                 r#"
@@ -622,6 +635,45 @@ mod tests {
             assert_eq!(config.port, 2222); // env over file
             assert_eq!(config.database.host, "1.1.1.1"); // file
 
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn correct_db_url() {
+        Jail::expect_with(|jail| {
+            jail.set_env("POLAR_PROFILE", "dev");
+            jail.create_file(
+                "polar.toml",
+                r#"
+                [dev.database]
+                host = "database"
+                user = "polar"
+                password = "polar"
+                schema = "polar"
+                "#,
+            )?;
+            let args = cli(
+                Some("polar.toml".to_string()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            let figment = Config::figment(&args).unwrap();
+            let config: Config = figment.extract()?;
+
+            assert_eq!(figment.profile(), "dev");
+            assert_eq!(
+                config.database.url(),
+                "postgres://polar:polar@database:5432/polar"
+            );
             Ok(())
         })
     }

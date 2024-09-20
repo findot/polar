@@ -6,6 +6,7 @@ use crate::database::{migrate as db_migrate, DbConnection};
 use crate::result::Result;
 use figment::Figment;
 use rocket::fairing::AdHoc;
+use rocket_db_pools::Database;
 
 pub mod core;
 pub mod routes;
@@ -28,9 +29,9 @@ impl App {
     }
 
     pub async fn serve<'a>(&self) -> Result<'a, ()> {
-        rocket::custom(&self.config)
+        rocket::custom(&self.figment)
             .attach(AdHoc::config::<Config>())
-            .attach(DbConnection::fairing())
+            .attach(DbConnection::init())
             .mount("/", routes::collect())
             .launch()
             .await?;
