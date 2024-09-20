@@ -202,8 +202,7 @@ impl Config {
             .merge(cli_config)
             .select(profile.as_str());
 
-        let final_conf = with_db_pool(config)?.select(profile.as_str());
-        Ok(final_conf)
+        Ok(with_db_pool(config)?.select(profile.as_str()))
     }
 }
 
