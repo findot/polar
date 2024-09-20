@@ -1,22 +1,25 @@
-use rocket::figment::{Error as FigmentError, Figment};
-use rocket_sync_db_pools::database;
-use rocket_sync_db_pools::diesel::PgConnection;
-use std::collections::HashMap;
+use crate::config::DatabaseConfig;
+use crate::result::DatabaseError;
+use diesel::pg::PgConnection;
+use diesel::Connection;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use rocket_db_pools::diesel::PgPool;
+use rocket_db_pools::Database;
 
-use crate::lib::config::Config;
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./resources/migrations/postgres");
 
+#[derive(Database)]
 #[database("postgresql_pool")]
-pub struct DbConnection(PgConnection);
+pub struct DbConnection(PgPool);
 
-pub fn with_pool(figment: Figment) -> Result<Figment, FigmentError> {
-    figment
-        .extract()
-        .map(|config: Config| {
-            HashMap::from([(
-                "postgresql_pool",
-                HashMap::from([("url", format!("{}", config.database))]),
-            )])
-        })
-        .map(|pool| Figment::from(("databases", pool)))
-        .map(|db_figment| figment.merge(db_figment))
+pub fn establish_connection(db_config: &DatabaseConfig) -> Result<PgConnection, DatabaseError> {
+    let url = db_config.to_string();
+    let conn = PgConnection::establish(&url)?;
+    Ok(conn)
+}
+
+pub fn migrate(db_config: &DatabaseConfig) -> Result<(), DatabaseError> {
+    let mut conn = establish_connection(db_config)?;
+    conn.run_pending_migrations(MIGRATIONS)?;
+    Ok(())
 }

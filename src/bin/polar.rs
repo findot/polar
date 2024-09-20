@@ -1,18 +1,12 @@
-use polar::app;
-use polar::lib::config::{Args, Config};
-use polar::lib::database::DbConnection;
+extern crate core;
 
 use clap::Parser;
-use rocket::fairing::AdHoc;
-use rocket::{launch, Build, Rocket};
 
-#[launch]
-fn rocket() -> Rocket<Build> {
-    let args: Args = Args::parse();
-    let conf = Config::figment(args).unwrap(); // TODO - Handle error
+use polar::{app::App, cli::Cli, result::Result};
+use rocket;
 
-    rocket::custom(conf)
-        .attach(AdHoc::config::<Config>())
-        .attach(DbConnection::fairing())
-        .mount("/", app::routes::collect())
+#[rocket::main]
+async fn main() -> Result<'static, ()> {
+    App::new(Cli::parse())?.run().await;
+    Ok(())
 }

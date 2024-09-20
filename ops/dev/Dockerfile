@@ -1,7 +1,10 @@
 FROM alpine:latest
 
-ENV DUMB_INIT_VERSION=1.2.5 \
-    RUSTUP_HOME=/usr/local/rustup \
+ARG TZ_LOCALE="Europe/Brussels"
+ARG USER_ID
+ARG GROUP_ID
+
+ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
     RUSTUP_URL="https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-musl/rustup-init" \
@@ -10,16 +13,16 @@ ENV DUMB_INIT_VERSION=1.2.5 \
 
 # DEPENDENCIES
 RUN apk add --update --no-cache \
+    util-linux \
+    dumb-init \
     ca-certificates \
     gcc \
     musl-dev \
     libpq-dev \
     inotify-tools
 
-# DUMB-INIT
-RUN set -eux && \
-    wget -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 && \
-    chmod +x /usr/local/bin/dumb-init
+RUN addgroup -S -g $GROUP_ID polar \
+    && adduser -S -u $USER_ID -G polar polar
 
 # CARGO & RUST
 RUN set -eux && \
@@ -32,16 +35,16 @@ RUN set -eux && \
 # TZ
 RUN set -eux && \
     apk add --update --no-cache tzdata && \
-    cp /usr/share/zoneinfo/Europe/Brussels /etc/localtime && \
-    echo "Europe/Brussels" > /etc/timezone && \
+    cp "/usr/share/zoneinfo/$TZ_LOCALE" /etc/localtime && \
+    echo "$TZ_LOCALE" > /etc/timezone && \
     apk del tzdata
 
 VOLUME /usr/src/app
 VOLUME /usr/local/cargo/registry
 
+ADD --chmod=770 --chown=polar entrypoint.sh /
+
 EXPOSE 8000
 
-ADD scripts/entrypoint.sh /
-
-ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["/entrypoint.sh"]
