@@ -14,13 +14,16 @@ RUN set -eux && \
     echo "$TZ_LOCALE" > /etc/timezone && \
     apk del tzdata
 
+# User & Group
+RUN addgroup -S polar && adduser -S -G polar -s /sbin/nologin polar
+
+# Binaries
+ADD --chown=polar:polar --chmod=770 ../../target/release/polar /usr/local/bin
+ADD --chown=polar:polar --chmod=660 ../../resources/polar.toml /etc/polar
+
 EXPOSE 8000
 VOLUME /etc/polar
-
-ADD entrypoint.sh /
-ADD ../../target/release/polar /usr/local/bin
-ADD ../../resources/polar.toml /etc/polar
-RUN chmod a+x /entrypoint.sh
+USER polar
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["polar", "serve"]
