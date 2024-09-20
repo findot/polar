@@ -1,5 +1,9 @@
 FROM alpine:latest
 
+ARG TZ_LOCALE="Europe/Brussels"
+ARG USER_ID
+ARG GROUP_ID
+
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
@@ -9,12 +13,16 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 
 # DEPENDENCIES
 RUN apk add --update --no-cache \
+    util-linux \
     dumb-init \
     ca-certificates \
     gcc \
     musl-dev \
     libpq-dev \
     inotify-tools
+
+RUN addgroup -S -g $GROUP_ID polar \
+    && adduser -S -u $USER_ID -G polar polar
 
 # CARGO & RUST
 RUN set -eux && \
@@ -27,17 +35,16 @@ RUN set -eux && \
 # TZ
 RUN set -eux && \
     apk add --update --no-cache tzdata && \
-    cp /usr/share/zoneinfo/Europe/Brussels /etc/localtime && \
-    echo "Europe/Brussels" > /etc/timezone && \
+    cp "/usr/share/zoneinfo/$TZ_LOCALE" /etc/localtime && \
+    echo "$TZ_LOCALE" > /etc/timezone && \
     apk del tzdata
 
 VOLUME /usr/src/app
 VOLUME /usr/local/cargo/registry
 
-EXPOSE 8000
+ADD --chmod=770 --chown=polar entrypoint.sh /
 
-ADD scripts/entrypoint.sh /
-RUN chmod a+x /entrypoint.sh
+EXPOSE 8000
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["/entrypoint.sh"]

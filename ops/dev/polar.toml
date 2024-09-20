@@ -1,4 +1,4 @@
-[dev]
+[debug]
 address = "0.0.0.0"
 port = 8000
 ident = "Polar"
@@ -7,7 +7,7 @@ temp_dir = "/tmp"
 cli_colors = true
 secret_key = "hPRYyVRiMyxpw5sBB1XeCMN1kFsDCqKvBi2QJxBVHQk="
 
-[dev.limits]
+[debug.limits]
 forms = "64 kB"
 json = "1 MiB"
 msgpack = "2 MiB"
@@ -17,17 +17,17 @@ msgpack = "2 MiB"
 #certs = "path/to/cert-chain.pem"
 #key = "path/to/key.pem"
 
-[dev.shutdown]
+[debug.shutdown]
 ctrlc = true
 signals = ["term", "hup"]
 grace = 5
 mercy = 5
 
-[dev.security]
+[debug.security]
 jwt_lifetime = 600
 jwt_secret = "secret"
 
-[dev.database]
+[debug.database]
 host = "database"
 user = "polar"
 password = "polar"

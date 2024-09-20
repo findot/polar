@@ -13,6 +13,8 @@ use serde_xml_rs::Error as SerdeXmlError;
 use serde_yaml::Error as SerdeYamlError;
 use toml::ser::Error as SerdeTomlError;
 
+use tokio_postgres::Error as TokioPgError;
+
 pub type Result<'a, T> = StdResult<T, Error<'a>>;
 
 // ---------------------------------------------------------------------------- Configuration Error
@@ -117,6 +119,7 @@ impl From<SerdeTomlError> for SerdeError {
 pub enum DatabaseError {
     ConnectionError(ConnectionError),
     MigrationError(Box<dyn StdError + Send + Sync>),
+    TokioPgError(TokioPgError),
 }
 
 impl Display for DatabaseError {
@@ -124,6 +127,7 @@ impl Display for DatabaseError {
         match self {
             DatabaseError::ConnectionError(ce) => Display::fmt(ce, f),
             DatabaseError::MigrationError(rme) => Display::fmt(rme, f),
+            DatabaseError::TokioPgError(tpge) => Display::fmt(tpge, f),
         }
     }
 }
@@ -133,6 +137,7 @@ impl StdError for DatabaseError {
         match self {
             DatabaseError::ConnectionError(ce) => ce.source(),
             DatabaseError::MigrationError(rme) => rme.source(),
+            DatabaseError::TokioPgError(tpge) => tpge.source(),
         }
     }
 }
@@ -146,6 +151,12 @@ impl From<ConnectionError> for DatabaseError {
 impl From<Box<dyn StdError + Send + Sync>> for DatabaseError {
     fn from(rme: Box<dyn StdError + Send + Sync>) -> Self {
         DatabaseError::MigrationError(rme)
+    }
+}
+
+impl From<TokioPgError> for DatabaseError {
+    fn from(tpge: TokioPgError) -> Self {
+        DatabaseError::TokioPgError(tpge)
     }
 }
 

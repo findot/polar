@@ -1,9 +1,10 @@
-version: "3.9"
-
 services:
-
   server:
-    build: .
+    build:
+      context: .
+      args:
+        USER_ID: ${UID}
+        GROUP_ID: ${GID}
     container_name: polar-server
     hostname: polar-server
     restart: unless-stopped
@@ -13,21 +14,14 @@ services:
       - source: polar_config
         target: /etc/polar/polar.toml
     volumes:
-      - cargo-registry:/usr/local/cargo/registry:rw,Z
-      - ./../../:/usr/src/app:rw,z
+      - cargo-registry:/usr/local/cargo/registry:rw
+      - ./../../:/usr/src/app:rw
     depends_on:
       - database
     links:
       - database
     environment:
-      POLAR_PROFILE: dev
-      POLAR_ADDRESS: 0.0.0.0
-      POLAR_PORT: 8000
-      POLAR_DATABASE_HOST: database
-      POLAR_DATABASE_PORT: 5432
-      POLAR_DATABASE_USER: polar
-      POLAR_DATABASE_PASSSWORD: polar
-      POLAR_DATABASE_SCHEMA: polar
+      POLAR_PROFILE: debug
 
   database:
     image: postgres:14.2-alpine
