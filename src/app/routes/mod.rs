@@ -8,7 +8,7 @@ mod api;
 use rocket::Route;
 
 pub fn collect() -> Vec<Route> {
-    routes!(index)
+    api::collect()
 }
 
 #[get("/")]

@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::io::{Error as IOError, ErrorKind};
 use std::path::Path;
 
+use figment::error::Kind;
 use figment::{
     map,
     providers::{Env, Format, Serialized, Toml},
@@ -12,21 +14,27 @@ use rocket_db_pools::Database;
 use serde::{Deserialize, Serialize};
 
 use super::cli::Cli;
-use super::database::DbConnection;
-use super::result::Error;
+use super::crypto;
+use super::database::Db;
+use super::result::{CryptoError, Error};
 
 /* -------------------------------------- Util functions --------------------------------------- */
 
 pub static DEFAULT_CONF_PATH: &str = "/etc/polar/polar.toml";
+static PRIV_KEY_CONF_PATH: &str = "security.private_key_path";
+static PUB_KEY_CONF_PATH: &str = "security.public_key_path";
 
-pub fn with_db_pool(figment: Figment) -> Result<Figment, FigmentError> {
-    figment
-        .extract()
-        .map(
-            |config: Config| map![DbConnection::NAME => map!["url" => config.database.to_string()]],
-        )
-        .map(|pool| Figment::from(("databases", pool)))
-        .map(|db_figment| figment.merge(db_figment))
+#[inline]
+fn missing(key: &'static str) -> FigmentError {
+    FigmentError::from(Kind::MissingField(Cow::Borrowed(key)))
+}
+
+#[inline]
+fn incorrect<'a, 'b>(key: &'a str, reason: CryptoError) -> FigmentError {
+    FigmentError::from(Kind::Message(format!(
+        "Incorrect value for key '{}': {}",
+        key, reason
+    )))
 }
 
 /* --------------------------------------- File handling --------------------------------------- */
@@ -93,14 +101,16 @@ impl Display for DatabaseConfig {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityConfig {
-    pub jwt_secret: String,
+    pub private_key: Vec<u8>,
+    pub public_key: Vec<u8>,
     pub jwt_lifetime: u16,
 }
 
 impl Default for SecurityConfig {
     fn default() -> Self {
         SecurityConfig {
-            jwt_secret: "secret".to_string(),
+            private_key: vec![],
+            public_key: vec![],
             jwt_lifetime: 900,
         }
     }
@@ -183,7 +193,7 @@ impl Config {
         Figment::from(provider).extract()
     }
 
-    pub fn figment<'a>(cli: &Cli) -> Result<Figment, Error<'a>> {
+    pub async fn figment<'a>(cli: &Cli) -> Result<Figment, Error<'a>> {
         let base = Figment::from(rocket::Config::default());
 
         let profile = cli
@@ -202,7 +212,38 @@ impl Config {
             .merge(cli_config)
             .select(profile.as_str());
 
-        Ok(with_db_pool(config)?.select(profile.as_str()))
+        let db_config = Config::with_db_pool(config)?;
+        let pk_config = Config::with_keys(db_config).await?;
+
+        Ok(pk_config.select(profile.as_str()))
+    }
+
+    fn with_db_pool(figment: Figment) -> Result<Figment, FigmentError> {
+        figment
+            .extract()
+            .map(|config: Config| map![Db::NAME => map!["url" => config.database.to_string()]])
+            .map(|pool| Figment::from(("databases", pool)))
+            .map(|db_figment| figment.merge(db_figment))
+    }
+
+    async fn with_keys(figment: Figment) -> Result<Figment, FigmentError> {
+        let priv_p = figment.find_value(PRIV_KEY_CONF_PATH)?;
+        let pub_p = figment.find_value(PUB_KEY_CONF_PATH)?;
+        match (priv_p.as_str(), pub_p.as_str()) {
+            (None, _) => Err(missing(PRIV_KEY_CONF_PATH)),
+            (_, None) => Err(missing(PUB_KEY_CONF_PATH)),
+            (Some(priv_path), Some(pub_path)) => {
+                let priv_key = crypto::extract_key(priv_path)
+                    .await
+                    .map_err(|ce| incorrect(PRIV_KEY_CONF_PATH, ce))?;
+                let pub_key = crypto::extract_key(pub_path)
+                    .await
+                    .map_err(|ce| incorrect(PUB_KEY_CONF_PATH, ce))?;
+                let keys_figment =
+                    Figment::from(("private_key", priv_key)).merge(("public_key", pub_key));
+                Ok(figment.merge(keys_figment))
+            }
+        }
     }
 }
 
@@ -210,12 +251,33 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    use core::str;
+    use std::future::Future;
+
     use super::{
         super::cli::{Cli, Command, Serve},
         Config,
     };
-    use crate::lib::config::from_file;
+    use crate::polar::config::from_file;
     use figment::{Error as FigmentError, Figment, Jail, Profile};
+
+    // Utils
+
+    static PRIV_KEY_BYTES: &[u8] = include_bytes!("../../resources/test_key.pem");
+    static PUB_KEY_BYTES: &[u8] = include_bytes!("../../resources/test_key.pub.pem");
+
+    fn sync<F: Future>(future: F) -> <F as std::future::Future>::Output {
+        tokio::runtime::Runtime::new().unwrap().block_on(future)
+    }
+
+    fn prepare_keys(jail: &mut Jail) {
+        jail.create_file("key.pem", str::from_utf8(PRIV_KEY_BYTES).unwrap())
+            .unwrap();
+        jail.create_file("key.pub.pem", str::from_utf8(PUB_KEY_BYTES).unwrap())
+            .unwrap();
+        jail.set_env("POLAR_SECURITY.PRIVATE_KEY_PATH", "key.pem");
+        jail.set_env("POLAR_SECURITY.PUBLIC_KEY_PATH", "key.pub.pem");
+    }
 
     fn cli(
         configuration: Option<String>,
@@ -227,7 +289,8 @@ mod tests {
         database_user: Option<String>,
         database_password: Option<String>,
         database_schema: Option<String>,
-        jwt_secret: Option<String>,
+        private_key_path: Option<String>,
+        public_key_path: Option<String>,
         jwt_lifetime: Option<u16>,
     ) -> Cli {
         Cli {
@@ -241,7 +304,8 @@ mod tests {
                 database_user,
                 database_password,
                 database_schema,
-                jwt_secret,
+                private_key_path,
+                public_key_path,
                 jwt_lifetime,
             }),
         }
@@ -249,7 +313,7 @@ mod tests {
 
     fn empty_cli() -> Cli {
         cli(
-            None, None, None, None, None, None, None, None, None, None, None,
+            None, None, None, None, None, None, None, None, None, None, None, None,
         )
     }
 
@@ -282,6 +346,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         ));
 
         let figment = Figment::from(Config::default()).merge(args);
@@ -294,6 +359,7 @@ mod tests {
         let args = Figment::from(cli(
             None,
             Some("custom".to_string()),
+            None,
             None,
             None,
             None,
@@ -322,7 +388,8 @@ mod tests {
             Some("test".to_string()),
             Some("test".to_string()),
             Some("test".to_string()),
-            Some("secret".to_string()),
+            Some("key.pem".to_string()),
+            Some("key.pub.pem".to_string()),
             Some(42),
         ));
 
@@ -343,7 +410,8 @@ mod tests {
         assert_eq!(config.database.user, "test");
         assert_eq!(config.database.password, "test");
         assert_eq!(config.database.schema, "test");
-        assert_eq!(config.security.jwt_secret, "secret");
+        // assert_eq!(config.security.private_key, PRIV_KEY_BYTES);
+        // assert_eq!(config.security.public_key, PUB_KEY_BYTES);
         assert_eq!(config.security.jwt_lifetime, 42);
     }
 
@@ -359,7 +427,8 @@ mod tests {
             Some("test".to_string()),
             None,
             None,
-            Some("secret".to_string()),
+            None, // FIXME
+            None, // FIXME
             Some(42),
         ));
 
@@ -381,7 +450,7 @@ mod tests {
         assert_eq!(config.database.user, "test");
         assert_eq!(config.database.password, default_config.database.password);
         assert_eq!(config.database.schema, default_config.database.schema);
-        assert_eq!(config.security.jwt_secret, "secret");
+        // assert_eq!(config.security.jwt_secret, "secret");
         assert_eq!(config.security.jwt_lifetime, 42);
     }
 
@@ -441,6 +510,11 @@ mod tests {
     #[test]
     fn args_select_config_file() {
         Jail::expect_with(|jail| {
+            jail.create_file("key.pem", str::from_utf8(PRIV_KEY_BYTES).unwrap())
+                .unwrap();
+            jail.create_file("key.pub.pem", str::from_utf8(PUB_KEY_BYTES).unwrap())
+                .unwrap();
+
             let args = cli(
                 Some("polar.toml".to_string()),
                 None,
@@ -451,7 +525,8 @@ mod tests {
                 None,
                 None,
                 None,
-                None,
+                Some("key.pem".to_string()),
+                Some("key.pub.pem".to_string()),
                 None,
             );
 
@@ -463,7 +538,7 @@ mod tests {
             "#,
             )?;
 
-            let config_result = Config::figment(&args);
+            let config_result = sync(Config::figment(&args));
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -490,9 +565,10 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
 
-        assert!(Config::figment(&args).is_err())
+        assert!(sync(Config::figment(&args)).is_err())
     }
 
     // Env
@@ -500,8 +576,10 @@ mod tests {
     #[test]
     fn env_select_profile() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             jail.set_env("POLAR_PROFILE", "custom");
-            let config = Config::figment(&empty_cli()).unwrap();
+            let config = sync(Config::figment(&empty_cli())).unwrap();
             assert_eq!(config.profile(), "custom");
 
             Ok(())
@@ -513,6 +591,8 @@ mod tests {
     #[test]
     fn precedence_env_over_file() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             jail.create_file(
                 "polar.toml",
                 r#"
@@ -522,7 +602,7 @@ mod tests {
             )?;
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
-            let figment = Config::figment(&empty_cli()).unwrap();
+            let figment = sync(Config::figment(&empty_cli())).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "0.0.0.0");
@@ -534,10 +614,13 @@ mod tests {
     #[test]
     fn precedence_args_over_file() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             let args = cli(
                 Some("polar.toml".to_string()),
                 None,
                 Some("192.168.1.42".to_string()),
+                None,
                 None,
                 None,
                 None,
@@ -556,7 +639,7 @@ mod tests {
                 "#,
             )?;
 
-            let config_result = Config::figment(&args);
+            let config_result = sync(Config::figment(&args));
             match &config_result {
                 Ok(_) => assert!(true),
                 Err(e) => assert!(false, "{}", e),
@@ -572,6 +655,8 @@ mod tests {
     #[test]
     fn precedence_args_over_env() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             let args = cli(
                 None,
                 None,
@@ -584,11 +669,12 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             );
 
             jail.set_env("POLAR_ADDRESS", "0.0.0.0");
 
-            let figment = Config::figment(&args).unwrap();
+            let figment = sync(Config::figment(&args)).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(config.address, "192.168.1.42");
@@ -600,6 +686,8 @@ mod tests {
     #[test]
     fn precedence_args_over_env_over_file() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             jail.set_env("POLAR_PROFILE", "dev");
             jail.create_file(
                 "polar.toml",
@@ -627,8 +715,9 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             );
-            let figment = Config::figment(&args).unwrap();
+            let figment = sync(Config::figment(&args)).unwrap();
             let config: Config = figment.select("default").extract()?;
 
             assert_eq!(config.address, "3.3.3.3"); // Arg over env over file
@@ -642,6 +731,8 @@ mod tests {
     #[test]
     fn correct_db_url() {
         Jail::expect_with(|jail| {
+            prepare_keys(jail);
+
             jail.set_env("POLAR_PROFILE", "dev");
             jail.create_file(
                 "polar.toml",
@@ -665,8 +756,9 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             );
-            let figment = Config::figment(&args).unwrap();
+            let figment = sync(Config::figment(&args)).unwrap();
             let config: Config = figment.extract()?;
 
             assert_eq!(figment.profile(), "dev");

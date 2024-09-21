@@ -1,13 +1,13 @@
 #[macro_use]
 extern crate rocket;
-#[macro_use]
-extern crate diesel_migrations;
 
 pub mod app;
-mod lib;
+mod polar;
 
-pub use lib::api;
-pub use lib::cli;
-pub use lib::config;
-pub use lib::database;
-pub use lib::result;
+pub use polar::api;
+pub use polar::cli;
+pub use polar::config;
+pub use polar::database;
+pub use polar::models;
+pub use polar::result;
+pub use polar::schema;

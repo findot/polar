@@ -7,6 +7,6 @@ use rocket;
 
 #[rocket::main]
 async fn main() -> Result<'static, ()> {
-    App::new(Cli::parse())?.run().await;
+    App::new(Cli::parse()).await?.run().await;
     Ok(())
 }

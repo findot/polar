@@ -45,7 +45,8 @@ fn serve_data<'a>(data: &Serve) -> Map<&'a str, Value> {
     };
 
     let security = map! {
-        "jwt_secret" => ref_str(&data.jwt_secret).map(Value::from),
+        "private_key_path" => ref_str(&data.private_key_path).map(Value::from),
+        "public_key_path" => ref_str(&data.public_key_path).map(Value::from),
         "jwt_lifetime" => data.jwt_lifetime.map(Value::from)
     };
 
@@ -146,9 +147,13 @@ pub struct Serve {
     #[clap(short = 's', long)]
     pub database_schema: Option<String>,
 
-    /// Seed of the jwt generation
+    /// The path of the private key used for jwt signing
     #[clap(short = 'k', long)]
-    pub jwt_secret: Option<String>,
+    pub private_key_path: Option<String>,
+
+    /// The path of the public key used for jwt signing
+    #[clap(short = 'K', long)]
+    pub public_key_path: Option<String>,
 
     /// Lifespan (in seconds) during which any emitted jwt token will be valid
     #[clap(short = 'l', long)]
@@ -165,7 +170,8 @@ impl Default for Serve {
             database_user: None,
             database_password: None,
             database_schema: None,
-            jwt_secret: None,
+            private_key_path: None,
+            public_key_path: None,
             jwt_lifetime: None,
         }
     }

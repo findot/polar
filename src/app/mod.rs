@@ -2,8 +2,9 @@ use std::process::exit;
 
 use crate::cli::{Cli, Command, DumpFormat};
 use crate::config::Config;
-use crate::database::{migrate as db_migrate, DbConnection};
+use crate::database::{migrate as db_migrate, Db};
 use crate::result::Result;
+use argon2::Argon2;
 use figment::Figment;
 use rocket::fairing::AdHoc;
 use rocket_db_pools::Database;
@@ -18,8 +19,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new<'a>(args: Cli) -> Result<'a, Self> {
-        let figment = Config::figment(&args)?;
+    pub async fn new<'a>(args: Cli) -> Result<'a, Self> {
+        let figment = Config::figment(&args).await?;
         let config: Config = figment.extract()?;
         Ok(Self {
             args,
@@ -31,7 +32,8 @@ impl App {
     pub async fn serve<'a>(&self) -> Result<'a, ()> {
         rocket::custom(&self.figment)
             .attach(AdHoc::config::<Config>())
-            .attach(DbConnection::init())
+            .attach(Db::init())
+            .manage(Argon2::default())
             .mount("/", routes::collect())
             .launch()
             .await?;

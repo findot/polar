@@ -8,7 +8,7 @@ use rocket::serde::{
     Serialize,
 };
 
-use crate::lib::result::Error as ApiError;
+use crate::polar::result::Error as ApiError;
 
 // Api response definition
 
@@ -20,7 +20,7 @@ pub struct ApiResponse<T: Serialize> {
 
 impl<T: Serialize> ApiResponse<T> {
     #[inline]
-    fn new(response: T, status: Status) -> Self {
+    pub fn new(response: T, status: Status) -> Self {
         Self {
             response: Some(response),
             status,
@@ -28,12 +28,12 @@ impl<T: Serialize> ApiResponse<T> {
     }
 
     #[inline]
-    fn ok(response: T) -> Self {
+    pub fn ok(response: T) -> Self {
         Self::new(response, Status::Ok)
     }
 
     #[inline]
-    fn empty(status: Status) -> Self {
+    pub fn empty(status: Status) -> Self {
         Self {
             response: None,
             status,
@@ -41,18 +41,23 @@ impl<T: Serialize> ApiResponse<T> {
     }
 
     #[inline]
-    fn created(response: T) -> Self {
+    pub fn created(response: T) -> Self {
         Self::new(response, Status::Created)
     }
 
     #[inline]
-    fn accepted(response: T) -> Self {
+    pub fn accepted(response: T) -> Self {
         Self::new(response, Status::Accepted)
     }
 
     #[inline]
-    fn no_content() -> Self {
+    pub fn no_content() -> Self {
         Self::empty(Status::NoContent)
+    }
+
+    #[inline]
+    pub fn not_found(response: T) -> Self {
+        Self::new(response, Status::NotFound)
     }
 }
 
@@ -92,3 +97,5 @@ impl<'r, 'a: 'r> Responder<'r, 'a> for ApiError<'a> {
             .ok()
     }
 }
+
+pub type Resp<'a, T> = Result<ApiResponse<T>, ApiError<'a>>;

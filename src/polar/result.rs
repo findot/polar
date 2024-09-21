@@ -1,21 +1,30 @@
-use crate::lib::result::ConfigurationError::{MisconfiguredEntry, MissingEntry};
-use diesel::ConnectionError;
-use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::io::Error as IOError;
 use std::option::Option;
 use std::result::Result as StdResult;
-
-use rocket::figment::Error as FigmentError;
-use rocket::Error as RocketError;
-use serde_json::Error as SerdeJsonError;
-use serde_xml_rs::Error as SerdeXmlError;
-use serde_yaml::Error as SerdeYamlError;
-use toml::ser::Error as SerdeTomlError;
 
 use tokio_postgres::Error as TokioPgError;
 
 pub type Result<'a, T> = StdResult<T, Error<'a>>;
+
+// -------------------------------------------------------------------------- Error types re-export
+
+pub mod errors {
+    pub use argon2::password_hash::Error as PwdHashError;
+    pub use diesel::result::Error as DieselError;
+    pub use diesel::ConnectionError as DbConnectionError;
+    pub use figment::Error as FigmentError;
+    pub use pem::PemError;
+    pub use rocket::tokio::io::Error as IOError;
+    pub use rocket::Error as RocketError;
+    pub use serde_json::Error as SerdeJsonError;
+    pub use serde_xml_rs::Error as SerdeXmlError;
+    pub use serde_yaml::Error as SerdeYamlError;
+    pub use std::error::Error as StdError;
+    pub use tokio_postgres::Error as TokioPgError;
+    pub use toml::ser::Error as SerdeTomlError;
+}
+
+use errors::*;
 
 // ---------------------------------------------------------------------------- Configuration Error
 
@@ -28,10 +37,10 @@ pub enum ConfigurationError<'a> {
 
 impl<'a> ConfigurationError<'a> {
     pub fn missing(key: &str) -> ConfigurationError {
-        MissingEntry(key)
+        ConfigurationError::MissingEntry(key)
     }
     pub fn misconfigured(key: &str) -> ConfigurationError {
-        MisconfiguredEntry(key)
+        ConfigurationError::MisconfiguredEntry(key)
     }
 }
 
@@ -54,6 +63,13 @@ impl<'a> Display for ConfigurationError<'a> {
 impl<'a> StdError for ConfigurationError<'a> {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         None
+    }
+}
+
+// IOError -> ConfigurationError
+impl<'a> From<IOError> for ConfigurationError<'a> {
+    fn from(e: IOError) -> Self {
+        ConfigurationError::InvalidSource(e)
     }
 }
 
@@ -117,9 +133,10 @@ impl From<SerdeTomlError> for SerdeError {
 
 #[derive(Debug)]
 pub enum DatabaseError {
-    ConnectionError(ConnectionError),
+    ConnectionError(DbConnectionError),
     MigrationError(Box<dyn StdError + Send + Sync>),
     TokioPgError(TokioPgError),
+    DieselError(DieselError),
 }
 
 impl Display for DatabaseError {
@@ -128,6 +145,7 @@ impl Display for DatabaseError {
             DatabaseError::ConnectionError(ce) => Display::fmt(ce, f),
             DatabaseError::MigrationError(rme) => Display::fmt(rme, f),
             DatabaseError::TokioPgError(tpge) => Display::fmt(tpge, f),
+            DatabaseError::DieselError(de) => Display::fmt(de, f),
         }
     }
 }
@@ -138,12 +156,13 @@ impl StdError for DatabaseError {
             DatabaseError::ConnectionError(ce) => ce.source(),
             DatabaseError::MigrationError(rme) => rme.source(),
             DatabaseError::TokioPgError(tpge) => tpge.source(),
+            DatabaseError::DieselError(de) => de.source(),
         }
     }
 }
 
-impl From<ConnectionError> for DatabaseError {
-    fn from(ce: ConnectionError) -> Self {
+impl From<DbConnectionError> for DatabaseError {
+    fn from(ce: DbConnectionError) -> Self {
         DatabaseError::ConnectionError(ce)
     }
 }
@@ -160,6 +179,58 @@ impl From<TokioPgError> for DatabaseError {
     }
 }
 
+impl From<DieselError> for DatabaseError {
+    fn from(de: DieselError) -> Self {
+        DatabaseError::DieselError(de)
+    }
+}
+
+// ----------------------------------------------------------------------------------- Crypto Error
+
+#[derive(Debug)]
+pub enum CryptoError {
+    IOError(IOError),
+    PemError(PemError),
+}
+
+impl Display for CryptoError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            CryptoError::IOError(ioe) => Display::fmt(ioe, f),
+            CryptoError::PemError(pe) => Display::fmt(pe, f),
+        }
+    }
+}
+
+impl StdError for CryptoError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            CryptoError::IOError(ioe) => ioe.source(),
+            CryptoError::PemError(pe) => pe.source(),
+        }
+    }
+}
+
+impl From<IOError> for CryptoError {
+    fn from(value: IOError) -> Self {
+        Self::IOError(value)
+    }
+}
+
+impl From<PemError> for CryptoError {
+    fn from(value: PemError) -> Self {
+        Self::PemError(value)
+    }
+}
+
+// ------------------------------------------------------------------------------------- Auth Error
+
+#[derive(Debug)]
+pub enum AuthError<'a> {
+    Forbidden(&'a str),
+    Unauthorized(&'a str),
+}
+
 // -------------------------------------------------------------------------------- Root Error type
 
 #[derive(Debug)]
@@ -171,6 +242,8 @@ pub enum Error<'a> {
     SerdeError(SerdeError),
     RocketError(RocketError),
     DatabaseError(DatabaseError),
+    PwdHashError(PwdHashError),
+    CryptoError(CryptoError),
 }
 
 impl<'a> Display for Error<'a> {
@@ -183,6 +256,8 @@ impl<'a> Display for Error<'a> {
             Error::SerdeError(se) => Display::fmt(se, f),
             Error::RocketError(re) => Display::fmt(re, f),
             Error::DatabaseError(de) => Display::fmt(de, f),
+            Error::PwdHashError(phe) => Display::fmt(phe, f),
+            Error::CryptoError(ce) => Display::fmt(ce, f),
         }
     }
 }
@@ -196,6 +271,7 @@ impl<'a> StdError for Error<'a> {
             Error::SerdeError(e) => e.source(),
             Error::RocketError(e) => e.source(),
             Error::DatabaseError(e) => e.source(),
+            //Error::PwdHashError(phe) => phe.source(),
             _ => None,
         }
     }
@@ -203,21 +279,17 @@ impl<'a> StdError for Error<'a> {
 
 // ------------------------------------------------------------------------------------ Conversions
 
+// FigmenError -> Error
 impl<'a> From<FigmentError> for Error<'a> {
     fn from(fe: FigmentError) -> Self {
         Error::FigmentError(fe)
     }
 }
 
+// ConfigurationError -> Error
 impl<'a, 'b: 'a> From<ConfigurationError<'b>> for Error<'a> {
     fn from(ce: ConfigurationError<'b>) -> Self {
         Error::ConfigurationError(ce)
-    }
-}
-
-impl<'a> From<IOError> for ConfigurationError<'a> {
-    fn from(e: IOError) -> Self {
-        ConfigurationError::InvalidSource(e)
     }
 }
 
@@ -266,6 +338,27 @@ impl<'a> From<RocketError> for Error<'a> {
 
 impl<'a> From<DatabaseError> for Error<'a> {
     fn from(ce: DatabaseError) -> Self {
-        Error::DatabaseError(ce)
+        match ce {
+            DatabaseError::DieselError(diesel::NotFound) => Self::NotFound,
+            _ => Error::DatabaseError(ce),
+        }
+    }
+}
+
+impl<'a> From<PwdHashError> for Error<'a> {
+    fn from(phe: PwdHashError) -> Self {
+        Error::PwdHashError(phe)
+    }
+}
+
+impl<'a> From<DieselError> for Error<'a> {
+    fn from(de: DieselError) -> Self {
+        Error::DatabaseError(de.into())
+    }
+}
+
+impl<'a> From<CryptoError> for Error<'a> {
+    fn from(ce: CryptoError) -> Self {
+        Error::CryptoError(ce)
     }
 }

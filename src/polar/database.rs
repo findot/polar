@@ -10,7 +10,7 @@ pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./resources/migrat
 
 #[derive(Database)]
 #[database("postgresql_pool")]
-pub struct DbConnection(PgPool);
+pub struct Db(PgPool);
 
 pub fn establish_connection(db_config: &DatabaseConfig) -> Result<PgConnection, DatabaseError> {
     let url = db_config.to_string();
